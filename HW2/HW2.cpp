@@ -20,17 +20,8 @@ const float ORIENTATION[9] = { 0, 1*ONE_EIGHTH_PI, 2* ONE_EIGHTH_PI , 3 * ONE_EI
 
 
 
-const Mat SOBEL_FILTER_GX =
-(Mat_<float>(3, 3) <<
-    +1.0, 0.0, -1.0,
-    +2.0, 0.0, -2.0,
-    +1.0, 0.0, -1.0);
 
-const Mat SOBEL_FILTER_GY =
-(Mat_<float>(3, 3) <<
-    +1.0, +2.0, +1.0,
-    +0.0, +0.0, +0.0,
-    -1.0, -2.0, -1.0);
+
 const Mat Gaussian_Filter = 
 (Mat_<float>(3, 3) <<
     +1.0 / 16.0, +2.0 / 16.0, +1.0 / 16.0,
@@ -67,24 +58,27 @@ void print_vecotr(vector<descriptor> output, string vec_name) {
     cout << endl;
 }*/
 /*=================== harris_detector ===============================*/
-Mat sobel_filter_x(Mat image_3_3) {
-    Mat I_x(3, 3, CV_32F); // image對x方向微分
-    for (int i = 0; i < image_3_3.rows; i++) {
-        for (int j = 0; j < image_3_3.cols;j++) {
-            I_x.at<float>(i, j) = image_3_3.at<float>(i, j) * SOBEL_FILTER_GX.at<float>(i, j);
-        }
-    }
-    return I_x;
+// 用 filter2D 計算 x 方向 Sobel 梯度
+void my_sobel_x(const Mat& src, Mat& grad_x) {
+    // SOBEL_FILTER_GX 為 x 方向 kernel
+    const Mat SOBEL_FILTER_GX =
+        (Mat_<float>(3, 3) <<
+            +1.0, 0.0, -1.0,
+            +2.0, 0.0, -2.0,
+            +1.0, 0.0, -1.0);
+    filter2D(src, grad_x, -1, SOBEL_FILTER_GX, Point(-1, -1), 0, BORDER_DEFAULT);
+    
 }
 
-Mat sobel_filter_y(Mat image_3_3) {
-    Mat I_y(3, 3, CV_32F); // image對y方向微分
-    for (int i = 0; i < image_3_3.rows; i++) {
-        for (int j = 0; j < image_3_3.cols;j++) {
-            I_y.at<float>(i, j) = image_3_3.at<float>(i, j) * SOBEL_FILTER_GY.at<float>(i, j);
-        }
-    }
-    return I_y;
+// 用 filter2D 計算 y 方向 Sobel 梯度
+void my_sobel_y(const Mat& src, Mat& grad_y) {
+    const Mat SOBEL_FILTER_GY =
+        (Mat_<float>(3, 3) <<
+            +1.0, +2.0, +1.0,
+            +0.0, +0.0, +0.0,
+            -1.0, -2.0, -1.0);
+    filter2D(src, grad_y, -1, SOBEL_FILTER_GY, Point(-1, -1), 0, BORDER_DEFAULT);
+    // SOBEL_FILTER_GY 為 y 方向 kernel
 }
 
 bool harris_detector(Mat I_x, Mat I_y) {
@@ -119,48 +113,48 @@ bool harris_detector(Mat I_x, Mat I_y) {
     return false;
 }
 
-vector<Point> detect_keypoints(Mat image, Mat image_gray){
-    /*
-        1.  We need a sobel filter to calculate the dx, dy
-    */
-    Mat imgae_guassian;
-    vector<Point> output;
-    Mat result_x, result_y, image_pad;
-
-    image_gray.convertTo(image_gray, CV_32F);
-    result_x.convertTo(result_x, CV_32F);
-    result_y.convertTo(result_y, CV_32F);
-
-    // 做 padding
-    copyMakeBorder(image_gray, image_pad, 1, 1, 1, 1, BORDER_CONSTANT, Scalar(0));
-    //int output[200];
-    for (auto i = 1; i < image_pad.rows-1; i++) {
-        for (auto j = 1; j < image_pad.cols-1;j++) {
-            Mat image_3_3 = Mat(image_pad, Range(i-1, i+2), Range(j-1, j+2));
-            Mat I_x, I_y;
-            bool is_corner;
-
-            I_x = sobel_filter_x(image_3_3);
-            I_y = sobel_filter_y(image_3_3);
-            is_corner = harris_detector(I_x, I_y);
-            if (is_corner) {
-                Point point(j-1, i-1);
-                output.push_back(point);
-                circle(image, point,3, Scalar(255, 255, 255), -1);
-            }
-        }
-    }
-    
-    // return output;
-    //namedWindow("Display", WINDOW_AUTOSIZE);
-    //imshow("Display", image);
-    //imwrite("Harris_corner.jpg", image);
-    //waitKey(0);
-    //destroyAllWindows();
-    //exit(3);
-    cout << "finish sobel" << endl;
-    return output;
-}
+//vector<Point> detect_keypoints(Mat image, Mat image_gray){
+//    /*
+//        1.  We need a sobel filter to calculate the dx, dy
+//    */
+//    Mat imgae_guassian;
+//    vector<Point> output;
+//    Mat result_x, result_y, image_pad;
+//
+//    image_gray.convertTo(image_gray, CV_32F);
+//    result_x.convertTo(result_x, CV_32F);
+//    result_y.convertTo(result_y, CV_32F);
+//
+//    // 做 padding
+//    copyMakeBorder(image_gray, image_pad, 1, 1, 1, 1, BORDER_CONSTANT, Scalar(0));
+//    //int output[200];
+//    for (auto i = 1; i < image_pad.rows-1; i++) {
+//        for (auto j = 1; j < image_pad.cols-1;j++) {
+//            Mat image_3_3 = Mat(image_pad, Range(i-1, i+2), Range(j-1, j+2));
+//            Mat I_x, I_y;
+//            bool is_corner;
+//
+//            I_x = sobel_filter_x(image/*_3_3);
+//            I_y = sobel_filter_y(image_3_3);*/
+//            is_corner = harris_detector(I_x, I_y);
+//            if (is_corner) {
+//                Point point(j-1, i-1);
+//                output.push_back(point);
+//                circle(image, point,3, Scalar(255, 255, 255), -1);
+//            }
+//        }
+//    }
+//    
+//    // return output;
+//    //namedWindow("Display", WINDOW_AUTOSIZE);
+//    //imshow("Display", image);
+//    //imwrite("Harris_corner.jpg", image);
+//    //waitKey(0);
+//    //destroyAllWindows();
+//    //exit(3);
+//    cout << "finish sobel" << endl;
+//    return output;
+//}
 
 /*====================descriptor================================*/
 
@@ -687,99 +681,121 @@ Mat transform_test(Mat image_1, Mat image_2, vector<KeyPoint> keypoints1_all, ve
 int blend() {
 
 }
+
+/*====================  my_blur ===================*/
+void my_blur(const Mat& src, Mat& dst) {
+    // 建立 3x3 平均模糊 kernel
+    Mat kernel = Mat::ones(3, 3, CV_32F) / 9.0f;
+    // 用自訂 kernel 對 src_float 做卷積濾波，結果存到 dst, Point(-1, -1) 
+    // Point(-1, -1) 表示 kernel 以中心點為 anchor（自動置中）
+	// 0 表示不加偏移
+	// BORDER_DEFAULT 表示邊界外的像素值由 OpenCV 自動決定
+    filter2D(src, dst, -1, kernel, Point(-1, -1), 0, BORDER_DEFAULT);
+    // 若要回傳原型態（如 CV_8U），可再轉回
+}
 /*=============================== main function =============================*/
 int main() {
-    
-    auto total_begin = chrono::steady_clock::now();
-    vector<pair<int, int>> match_kepoints;
+    //vector<pair<int, int>> match_kepoints;
 
-    vector<descriptor> descriptor_image_1, descriptor_image_2;
-    vector<Point> keypoints_1, keypoints_2;
+    //vector<descriptor> descriptor_image_1, descriptor_image_2;
+    //vector<Point> keypoints_1, keypoints_2;
 
-    Mat image_1 = imread("01.JPG", CV_32F);
-    Mat image_2 = imread("02.JPG", CV_32F);
-    Mat  image_gray_1, image_gray_blur_1;
-    Mat  image_gray_2, image_gray_blur_2;
+    // read image
+    Mat image_1 = imread("01.JPG", IMREAD_COLOR);
+    Mat image_2 = imread("02.JPG", IMREAD_COLOR);
 
-
-    int ddepth = CV_16S;
-
+	// convert to gray
+    Mat  image_gray_1, image_gray_2;
     cvtColor(image_1, image_gray_1, COLOR_BGR2GRAY);
     cvtColor(image_2, image_gray_2, COLOR_BGR2GRAY);
 
-    Mat grad_x_1, grad_y_1;
-    Mat grad_x_2, grad_y_2;
+	// 從 CV_8U 轉成 CV_32F (int -> float)
+	image_gray_1.convertTo(image_gray_1, CV_32F);
+    image_gray_2.convertTo(image_gray_2, CV_32F);
 
-    auto detected_begin = chrono::steady_clock::now();
-    blur(image_gray_1, image_gray_blur_1, Size(3, 3), Point(-1, -1));
-    blur(image_gray_2, image_gray_blur_2, Size(3, 3), Point(-1, -1));
-    Sobel(image_gray_blur_1, grad_x_1, ddepth, 1, 0, 3, 1, 0, BORDER_DEFAULT);
-    Sobel(image_gray_blur_1, grad_y_1, ddepth, 0, 1, 3, 1, 0, BORDER_DEFAULT);
-    Sobel(image_gray_blur_2, grad_x_2, ddepth, 1, 0, 3, 1, 0, BORDER_DEFAULT);
-    Sobel(image_gray_blur_2, grad_y_2, ddepth, 0, 1, 3, 1, 0, BORDER_DEFAULT);
-    keypoints_1 = detect_keypoints(image_gray_blur_1, image_gray_1);
-    keypoints_2 = detect_keypoints(image_gray_blur_2, image_gray_2);
-    auto detected_end = chrono::steady_clock::now();
-    auto detected_elapsed = chrono::duration<double>(detected_end - detected_begin);
-    cout << "detected: " << detected_elapsed.count() << " seconds" << endl;
+	// Gaussian blur
+    // Sobel 是微分運算，對雜訊非常敏感。直接對原始影像做 Sobel，雜訊會被放大，導致偵測到很多「假邊緣」。
+    Mat  image_gray_blur_1, image_gray_blur_2;
+	my_blur(image_gray_1, image_gray_blur_1);
+	my_blur(image_gray_2, image_gray_blur_2);
+    //imwrite("image_gray_blur_1.jpg", image_gray_blur_1);
+    //imwrite("image_gray_blur_2.jpg", image_gray_blur_2);
 
-
-    auto matched_begin = chrono::steady_clock::now();
-    descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
-    descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
-    match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
-    auto matched_end = chrono::steady_clock::now();
-    auto matched_elapsed = chrono::duration<double>(matched_end - matched_begin);
-    cout << "Matched time: " << matched_elapsed.count() << " seconds" << endl;
-
-
-    cout << "matched: " << match_kepoints.size() << endl;
-    vector<KeyPoint> keypoints1, keypoints2;
-    Mat img_matches;
+	// Sobel filter to get gradient
+	// 找到影像的邊緣
+	Mat grad_x_1, grad_y_1, grad_x_2, grad_y_2;
+	my_sobel_x(image_gray_blur_1, grad_x_1);
+	my_sobel_y(image_gray_blur_1, grad_y_1);
+	my_sobel_x(image_gray_blur_2, grad_x_2);
+	my_sobel_y(image_gray_blur_2, grad_y_2);
+	//imwrite("grad_x_1.jpg", grad_x_1);
+	//imwrite("grad_y_1.jpg", grad_y_1);
+	//imwrite("grad_x_2.jpg", grad_x_2);
+	//imwrite("grad_y_2.jpg", grad_y_2);
     
-    vector< DMatch >good_matches;
-    for (size_t i = 0; i < keypoints_1.size(); i++) {
-        keypoints1.push_back(KeyPoint(keypoints_1[i], 1.f));
-    }
-    for (size_t i = 0; i < keypoints_2.size(); i++) {
-        keypoints2.push_back(KeyPoint(keypoints_2[i], 1.f));
-    }
-    for (size_t i = 0; i < match_kepoints.size(); i++) {
-        int query_index = match_kepoints[i].first;
-        int target_index = match_kepoints[i].second;
-        //float distance = keypoints_1[query_index].x - keypoints_2[target_index].x
-        DMatch tmp_match(query_index, target_index, 0);
-        good_matches.push_back(tmp_match);
-    }
+   
+    //keypoints_1 = detect_keypoints(image_gray_blur_1, image_gray_1);
+    //keypoints_2 = detect_keypoints(image_gray_blur_2, image_gray_2);
+    //auto detected_end = chrono::steady_clock::now();
+    //auto detected_elapsed = chrono::duration<double>(detected_end - detected_begin);
+    //cout << "detected: " << detected_elapsed.count() << " seconds" << endl;
+
+    //auto matched_begin = chrono::steady_clock::now();
+    //descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
+    //descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
+    //match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
+    //auto matched_end = chrono::steady_clock::now();
+    //auto matched_elapsed = chrono::duration<double>(matched_end - matched_begin);
+    //cout << "Matched time: " << matched_elapsed.count() << " seconds" << endl;
+
+
+    //cout << "matched: " << match_kepoints.size() << endl;
+    //vector<KeyPoint> keypoints1, keypoints2;
+    //Mat img_matches;
+    //
+    //vector< DMatch >good_matches;
+    //for (size_t i = 0; i < keypoints_1.size(); i++) {
+    //    keypoints1.push_back(KeyPoint(keypoints_1[i], 1.f));
+    //}
+    //for (size_t i = 0; i < keypoints_2.size(); i++) {
+    //    keypoints2.push_back(KeyPoint(keypoints_2[i], 1.f));
+    //}
+    //for (size_t i = 0; i < match_kepoints.size(); i++) {
+    //    int query_index = match_kepoints[i].first;
+    //    int target_index = match_kepoints[i].second;
+    //    //float distance = keypoints_1[query_index].x - keypoints_2[target_index].x
+    //    DMatch tmp_match(query_index, target_index, 0);
+    //    good_matches.push_back(tmp_match);
+    //}
 
    
-    drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches, Scalar::all(-1),
-        Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-    
+    //drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches, Scalar::all(-1),
+    //    Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+    //
 
-    vector<KeyPoint> match_list_1, match_list_2;
-    for (int i = 0;i < good_matches.size();i++) {
-        KeyPoint source = keypoints1[good_matches[i].queryIdx];
-        KeyPoint destination = keypoints2[good_matches[i].trainIdx];
-        match_list_1.push_back(source);
-        match_list_2.push_back(destination);
-    }
-    
-    //Mat h =  findHomography(match_list_1, match_list_2, 0);
-    //Mat Homorgraphic = transform(keypoints1,  keypoints2, good_matches);
-    Mat new_image;
-    new_image = transform_test(image_1, image_2, match_list_1, match_list_2);
+    //vector<KeyPoint> match_list_1, match_list_2;
+    //for (int i = 0;i < good_matches.size();i++) {
+    //    KeyPoint source = keypoints1[good_matches[i].queryIdx];
+    //    KeyPoint destination = keypoints2[good_matches[i].trainIdx];
+    //    match_list_1.push_back(source);
+    //    match_list_2.push_back(destination);
+    //}
+    //
+    ////Mat h =  findHomography(match_list_1, match_list_2, 0);
+    ////Mat Homorgraphic = transform(keypoints1,  keypoints2, good_matches);
+    //Mat new_image;
+    //new_image = transform_test(image_1, image_2, match_list_1, match_list_2);
    
-    auto total_end = chrono::steady_clock::now();
-    auto total_elapsed = chrono::duration<double>(total_end - total_begin);
-    cout << "total: " << total_elapsed.count() << " seconds" << endl;
+    //auto total_end = chrono::steady_clock::now();
+    //auto total_elapsed = chrono::duration<double>(total_end - total_begin);
+    //cout << "total: " << total_elapsed.count() << " seconds" << endl;
 
-    namedWindow("my", 0);
-    resizeWindow("my", new_image.size() / 4);
-    imshow("my", new_image);
-    imwrite("result.jpg", new_image);
-    waitKey(0);
-    destroyAllWindows();
+    //namedWindow("my", 0);
+    //resizeWindow("my", new_image.size() / 4);
+    //imshow("my", new_image);
+    //imwrite("result.jpg", new_image);
+    //waitKey(0);
+    //destroyAllWindows();
     return 0;
     
 }
