@@ -17,16 +17,21 @@ using namespace Eigen;
 # define PI 3.14159265358979323846
 # define ONE_EIGHTH_PI (1.0/4.0*PI)
 const float ORIENTATION[9] = { 0, 1*ONE_EIGHTH_PI, 2* ONE_EIGHTH_PI , 3 * ONE_EIGHTH_PI , 4 * ONE_EIGHTH_PI , 5 * ONE_EIGHTH_PI , 6 * ONE_EIGHTH_PI , 7 * ONE_EIGHTH_PI , 8 * ONE_EIGHTH_PI };
+const Mat Gaussian_Filter = (Mat_<float>(3, 3) <<
+    1, 2, 1,
+    2, 4, 2,
+    1, 2, 1) / 16.0f;
 
+/*====================  my_blur ===================*/
+void my_blur(const Mat& src, Mat& dst) {
+    // 在做 Sobel 前，對原始影像做高斯平滑（如 my_blur），目的是抑制雜訊。
+    // Point(-1, -1) 表示 kernel 以中心點為 anchor（自動置中）
+    // 0 表示不加偏移
+    // BORDER_DEFAULT 表示邊界外的像素值由 OpenCV 自動決定
+    filter2D(src, dst, -1, Gaussian_Filter, Point(-1, -1), 0, BORDER_DEFAULT);
+    // 若要回傳原型態（如 CV_8U），可再轉回
+}
 
-
-
-
-const Mat Gaussian_Filter = 
-(Mat_<float>(3, 3) <<
-    +1.0 / 16.0, +2.0 / 16.0, +1.0 / 16.0,
-    +2.0 / 16.0, +4.0 / 16.0, +2.0 / 16.0,
-    +1.0 / 16.0, +2.0 / 16.0, +1.0 / 16.0);
 
 class descriptor {
 public:
@@ -34,29 +39,6 @@ public:
     vector<float> orientation_vector;
 };
 
-
-void print_vecotr(vector<Point> vec,string vec_name) {
-    cout << vec_name << endl;
-    for (int j = 0; j < vec.size();j++) {
-        cout << vec[j] << " ";
-    }
-    cout << endl;
-}
-void print_vecotr(vector<float> vec, string vec_name) {
-    cout << vec_name << endl;
-    for (int j = 0; j < vec.size();j++) {
-        cout << vec[j] << " ";
-    }
-    cout << endl;
-}
-/*
-void print_vecotr(vector<descriptor> output, string vec_name) {
-    cout << vec_name << endl;
-    for (int j = 0; j < output.size();j++) {
-        cout << output.orientation_vector[j] << " ";
-    }
-    cout << endl;
-}*/
 /*=================== harris_detector ===============================*/
 // 用 filter2D 計算 x 方向 Sobel 梯度
 void my_sobel_x(const Mat& src, Mat& grad_x) {
@@ -81,81 +63,47 @@ void my_sobel_y(const Mat& src, Mat& grad_y) {
     // SOBEL_FILTER_GY 為 y 方向 kernel
 }
 
-bool harris_detector(Mat I_x, Mat I_y) {
-    Mat weight_Ix_square(I_x * I_x);
-    Mat weight_Iy_square(I_y * I_y);
-    Mat weight_Ix_Iy(I_x * I_y);
-    
-    for (auto i = 0; i < weight_Ix_square.rows; i++) { 
-        for (auto j = 0; j < weight_Ix_square.cols;j++) {
-           // cout << weight_Ix_square.at<float>(i, j) << " ";
-            weight_Ix_square.at<float>(i, j) = (weight_Ix_square.at<float>(i, j) * Gaussian_Filter.at<float>(i, j));
-            weight_Iy_square.at<float>(i, j) = (weight_Iy_square.at<float>(i, j) * Gaussian_Filter.at<float>(i, j));
-            weight_Ix_Iy.at<float>(i, j) = (weight_Iy_square.at<float>(i, j) * Gaussian_Filter.at<float>(i, j));
-        }
-        //cout << endl;
-    }
-    
-    Mat M = (Mat_<float>(2, 2) <<
-        sum(weight_Ix_square)[0], sum(weight_Ix_Iy)[0],
-        sum(weight_Ix_Iy)[0], sum(weight_Iy_square)[0]);
+// Harris 角點偵測：回傳所有角點座標
+vector<Point> my_harris_detector(const Mat& src, float threshold = 1e7) {
+    // 1. 計算 x, y 方向梯度
+    Mat grad_x, grad_y;
+    my_sobel_x(src, grad_x);
+    my_sobel_y(src, grad_y);
 
-    float M_determinant = cv::determinant(M);
-    float M_trace = cv::trace(M)[0];
+    // 2. 計算 Ix^2, Iy^2, IxIy
+    Mat Ix2 = grad_x.mul(grad_x);
+    Mat Iy2 = grad_y.mul(grad_y);
+    Mat IxIy = grad_x.mul(grad_y);
+
+    // 3. 高斯平滑 (用 3x3 Gaussian_Filter)
+    // 讓每個像素的角點響應值 R 能反映周圍像素的梯度分布
+
+    Mat Sx2, Sy2, Sxy;
+	my_blur(Ix2, Sx2);
+	my_blur(Iy2, Sy2);
+	my_blur(IxIy, Sxy);
+
+
+    // 4. 計算 Harris R 值
+    vector<Point> keypoints;
     double k = 0.04;
-    double R = M_determinant - (k * pow(M_trace, 2));
+    for (int y = 1; y < src.rows - 1; ++y) {
+        for (int x = 1; x < src.cols - 1; ++x) {
+            float a = Sx2.at<float>(y, x);
+            float b = Sxy.at<float>(y, x);
+            float c = Sy2.at<float>(y, x);
 
-    if (R > 10000000) {
-        //cout << R << endl;
-        return true;
+            float detM = a * c - b * b;
+            float traceM = a + c;
+            float R = detM - k * traceM * traceM;
+
+            if (R > threshold) {
+                keypoints.push_back(Point(x, y));
+            }
+        }
     }
-    
-    return false;
+    return keypoints;
 }
-
-//vector<Point> detect_keypoints(Mat image, Mat image_gray){
-//    /*
-//        1.  We need a sobel filter to calculate the dx, dy
-//    */
-//    Mat imgae_guassian;
-//    vector<Point> output;
-//    Mat result_x, result_y, image_pad;
-//
-//    image_gray.convertTo(image_gray, CV_32F);
-//    result_x.convertTo(result_x, CV_32F);
-//    result_y.convertTo(result_y, CV_32F);
-//
-//    // 做 padding
-//    copyMakeBorder(image_gray, image_pad, 1, 1, 1, 1, BORDER_CONSTANT, Scalar(0));
-//    //int output[200];
-//    for (auto i = 1; i < image_pad.rows-1; i++) {
-//        for (auto j = 1; j < image_pad.cols-1;j++) {
-//            Mat image_3_3 = Mat(image_pad, Range(i-1, i+2), Range(j-1, j+2));
-//            Mat I_x, I_y;
-//            bool is_corner;
-//
-//            I_x = sobel_filter_x(image/*_3_3);
-//            I_y = sobel_filter_y(image_3_3);*/
-//            is_corner = harris_detector(I_x, I_y);
-//            if (is_corner) {
-//                Point point(j-1, i-1);
-//                output.push_back(point);
-//                circle(image, point,3, Scalar(255, 255, 255), -1);
-//            }
-//        }
-//    }
-//    
-//    // return output;
-//    //namedWindow("Display", WINDOW_AUTOSIZE);
-//    //imshow("Display", image);
-//    //imwrite("Harris_corner.jpg", image);
-//    //waitKey(0);
-//    //destroyAllWindows();
-//    //exit(3);
-//    cout << "finish sobel" << endl;
-//    return output;
-//}
-
 /*====================descriptor================================*/
 
 
@@ -682,24 +630,12 @@ int blend() {
 
 }
 
-/*====================  my_blur ===================*/
-void my_blur(const Mat& src, Mat& dst) {
-    // 建立 3x3 平均模糊 kernel
-    Mat kernel = Mat::ones(3, 3, CV_32F) / 9.0f;
-    // 用自訂 kernel 對 src_float 做卷積濾波，結果存到 dst, Point(-1, -1) 
-    // Point(-1, -1) 表示 kernel 以中心點為 anchor（自動置中）
-	// 0 表示不加偏移
-	// BORDER_DEFAULT 表示邊界外的像素值由 OpenCV 自動決定
-    filter2D(src, dst, -1, kernel, Point(-1, -1), 0, BORDER_DEFAULT);
-    // 若要回傳原型態（如 CV_8U），可再轉回
-}
+
 /*=============================== main function =============================*/
 int main() {
     //vector<pair<int, int>> match_kepoints;
 
     //vector<descriptor> descriptor_image_1, descriptor_image_2;
-    //vector<Point> keypoints_1, keypoints_2;
-
     // read image
     Mat image_1 = imread("01.JPG", IMREAD_COLOR);
     Mat image_2 = imread("02.JPG", IMREAD_COLOR);
@@ -714,12 +650,12 @@ int main() {
     image_gray_2.convertTo(image_gray_2, CV_32F);
 
 	// Gaussian blur
-    // Sobel 是微分運算，對雜訊非常敏感。直接對原始影像做 Sobel，雜訊會被放大，導致偵測到很多「假邊緣」。
+    // 在做 Sobel 前，對原始影像做高斯平滑（如 my_blur），目的是抑制雜訊。
     Mat  image_gray_blur_1, image_gray_blur_2;
 	my_blur(image_gray_1, image_gray_blur_1);
 	my_blur(image_gray_2, image_gray_blur_2);
-    //imwrite("image_gray_blur_1.jpg", image_gray_blur_1);
-    //imwrite("image_gray_blur_2.jpg", image_gray_blur_2);
+    imwrite("image_gray_blur_1.jpg", image_gray_blur_1);
+    imwrite("image_gray_blur_2.jpg", image_gray_blur_2);
 
 	// Sobel filter to get gradient
 	// 找到影像的邊緣
@@ -728,14 +664,28 @@ int main() {
 	my_sobel_y(image_gray_blur_1, grad_y_1);
 	my_sobel_x(image_gray_blur_2, grad_x_2);
 	my_sobel_y(image_gray_blur_2, grad_y_2);
-	//imwrite("grad_x_1.jpg", grad_x_1);
-	//imwrite("grad_y_1.jpg", grad_y_1);
-	//imwrite("grad_x_2.jpg", grad_x_2);
-	//imwrite("grad_y_2.jpg", grad_y_2);
+	imwrite("grad_x_1.jpg", grad_x_1);
+	imwrite("grad_y_1.jpg", grad_y_1);
+	imwrite("grad_x_2.jpg", grad_x_2);
+	imwrite("grad_y_2.jpg", grad_y_2);
     
-   
-    //keypoints_1 = detect_keypoints(image_gray_blur_1, image_gray_1);
-    //keypoints_2 = detect_keypoints(image_gray_blur_2, image_gray_2);
+	// Harris corner detection
+    vector<Point> keypoints_1, keypoints_2;
+    keypoints_1 = my_harris_detector(image_gray_blur_1);
+    keypoints_2 = my_harris_detector(image_gray_blur_2);
+    // 在 main() 最後加上這段，將 keypoints_1 顯示在黑色影像上（白色點）
+ //   Mat black_image_1 = Mat::zeros(image_gray_1.size(), CV_8UC3); // 建立黑色底圖 (3通道)
+	//Mat black_image_2 = Mat::zeros(image_gray_2.size(), CV_8UC3); // 建立黑色底圖 (3通道)
+ //   for (const Point& pt : keypoints_1) {
+ //       circle(black_image_1, pt, 2, Scalar(255, 255, 255), -1); // 白色圓點
+ //   }
+ //   for (const Point& pt : keypoints_2) {
+ //       circle(black_image_2, pt, 2, Scalar(255, 255, 255), -1); // 白色圓點
+	//}
+ //   imwrite("keypoints_1.jpg", black_image_1);
+	//imwrite("keypoints_2.jpg", black_image_2);
+
+
     //auto detected_end = chrono::steady_clock::now();
     //auto detected_elapsed = chrono::duration<double>(detected_end - detected_begin);
     //cout << "detected: " << detected_elapsed.count() << " seconds" << endl;
