@@ -372,6 +372,7 @@ vector<pair<int, int>> get_match_keypoints(
 
 /*=============================== main function =============================*/
 int main() {
+    /*
     //vector<pair<int, int>> match_kepoints;
 
     //vector<descriptor> descriptor_image_1, descriptor_image_2;
@@ -456,7 +457,7 @@ int main() {
     vector<DMatch> good_matches;
     for (size_t i = 0; i < knn_matches.size(); ++i) {
         if (knn_matches[i].size() >= 2 &&
-            knn_matches[i][0].distance < 0.7f * knn_matches[i][1].distance) {
+            knn_matches[i][0].distance < 0.2f * knn_matches[i][1].distance) {
             good_matches.push_back(knn_matches[i][0]);
         }
     }
@@ -483,7 +484,7 @@ int main() {
 
     // 計算 Homography
     cout << "計算 Homography..." << endl;
-    Mat H = findHomography(pts2 , pts1, RANSAC);
+    Mat H = findHomography(pts2 , pts1, RANSAC, 1.0);
     if (H.empty()) {
         cout << "Homography 計算失敗！" << endl;
         return -1;
@@ -494,16 +495,6 @@ int main() {
    // 1. 先建立以 image1 為底的結果圖
     Mat result = Mat::zeros(Size(image_1.cols * 2, image_1.rows * 1.2), image_1.type());
     image_1.copyTo(result(Rect(0, 0, image_1.cols, image_1.rows)));
-
-    // 2. 計算 image2 要變換的位置
-    vector<Point2f> corners(4);
-    corners[0] = Point2f(0, 0);
-    corners[1] = Point2f(image_2.cols, 0);
-    corners[2] = Point2f(image_2.cols, image_2.rows);
-    corners[3] = Point2f(0, image_2.rows);
-
-    // 3. 計算逆向的 Homography（因為我們要變換 image2）
-    //Mat H_inv = H.inv();
 
     // 4. 變換 image2 並疊加到 result 上
     Mat warped_image2;
@@ -538,9 +529,47 @@ int main() {
     Mat cropped = result(bbox);
 
     // 7. 儲存結果
-    imwrite("panorama_image1_base.jpg", result);
-    imwrite("panorama_image1_base_cropped.jpg", cropped);
+    imwrite("panorama_image1_base1.jpg", result);
+    imwrite("panorama_image1_base_cropped1.jpg", cropped);
    
+    //
+    */
+    // 1. 偵測 ORB 特徵點
+    Mat img1 = imread("01.JPG");
+    Mat img2 = imread("02.JPG");
+
+    Ptr<ORB> orb = ORB::create();
+    vector<KeyPoint> kp1, kp2;
+    Mat desc1, desc2;
+    orb->detectAndCompute(img1, noArray(), kp1, desc1);
+    orb->detectAndCompute(img2, noArray(), kp2, desc2);
+
+    // 2. 特徵點匹配
+    BFMatcher matcher(NORM_HAMMING);
+    vector<DMatch> matches;
+    matcher.match(desc1, desc2, matches);
+
+    // 3. 選擇最佳匹配（簡單方法）
+    sort(matches.begin(), matches.end());
+    matches.resize(matches.size() * 0.15); // 取前15%好點
+
+    // 4. 計算 Homography
+    vector<Point2f> pts1, pts2;
+    for (auto& m : matches) {
+        pts1.push_back(kp1[m.queryIdx].pt);
+        pts2.push_back(kp2[m.trainIdx].pt);
+    }
+    Mat H = findHomography(pts2, pts1, RANSAC);
+
+    // 5. 拼接影像
+    Mat result;
+    warpPerspective(img2, result, H, Size(img1.cols + img2.cols, img1.rows));
+    img1.copyTo(result(Rect(0, 0, img1.cols, img1.rows)));
+
+    imwrite("Stitched.jpg", result);
+    waitKey(0);
+    return 0;
+
     return 0;
     
 }
