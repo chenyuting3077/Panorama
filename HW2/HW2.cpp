@@ -11,18 +11,23 @@
 #include <opencv2/calib3d.hpp>
 #include <sstream>
 #include <Eigen/Dense>
+#include <random>
+#include <numeric> 
+
 using namespace std;
 using namespace cv;
 using namespace Eigen;
 # define PI 3.14159265358979323846
 # define ONE_EIGHTH_PI (1.0/4.0*PI)
 const float ORIENTATION[9] = { 0, 1*ONE_EIGHTH_PI, 2* ONE_EIGHTH_PI , 3 * ONE_EIGHTH_PI , 4 * ONE_EIGHTH_PI , 5 * ONE_EIGHTH_PI , 6 * ONE_EIGHTH_PI , 7 * ONE_EIGHTH_PI , 8 * ONE_EIGHTH_PI };
+
+
+/*====================  my_blur ===================*/
 const Mat Gaussian_Filter = (Mat_<float>(3, 3) <<
     1, 2, 1,
     2, 4, 2,
     1, 2, 1) / 16.0f;
 
-/*====================  my_blur ===================*/
 void my_blur(const Mat& src, Mat& dst) {
     // 在做 Sobel 前，對原始影像做高斯平滑（如 my_blur），目的是抑制雜訊。
     // Point(-1, -1) 表示 kernel 以中心點為 anchor（自動置中）
@@ -31,14 +36,6 @@ void my_blur(const Mat& src, Mat& dst) {
     filter2D(src, dst, -1, Gaussian_Filter, Point(-1, -1), 0, BORDER_DEFAULT);
     // 若要回傳原型態（如 CV_8U），可再轉回
 }
-
-
-class descriptor {
-public:
-    Point point;
-    vector<float> orientation_vector;
-};
-
 /*=================== harris_detector ===============================*/
 // 用 filter2D 計算 x 方向 Sobel 梯度
 void my_sobel_x(const Mat& src, Mat& grad_x) {
@@ -104,7 +101,23 @@ vector<Point> my_harris_detector(const Mat& src, float threshold = 1e7) {
     }
     return keypoints;
 }
-/*====================descriptor================================*/
+
+/*==================== SIFT ================================*/
+/* SIFT解釋 
+用途: 影像特徵點偵測與描述
+流程: 
+Dog (差分高斯) 金字塔構建
+1. 對影像進行高斯模糊
+2. 計算影像梯度 (Sobel)
+3. 計算每個像素的梯度幅值與方向
+4. 對每個關鍵點周圍的區域進行描述子計算
+輸出: 關鍵點位置與描述子向量
+*/
+class descriptor {
+public:
+    Point point;
+    vector<float> orientation_vector;
+};
 
 
 float get_magnitude(Mat image_gray_blur_pad, Mat grad_x, Mat grad_y, Point point) {
@@ -114,179 +127,106 @@ float get_magnitude(Mat image_gray_blur_pad, Mat grad_x, Mat grad_y, Point point
     *         squrt((L(x+1,y) - L(x-1,y))^2 + (L(x, y+1) - L(x, y-1))^2)
     * output: m(x,y)
     */
-    //cout << "get_magnitude" << point << endl;
 
-
-    float x_distance = (float)image_gray_blur_pad.at<uchar>(point.y, point.x+1) - (float)image_gray_blur_pad.at<uchar>(point.y, point.x - 1);
-    float y_distance = (float)image_gray_blur_pad.at<uchar>(point.y + 1, point.x) - (float)image_gray_blur_pad.at<uchar>(point.y - 1, point.x);
-    //float x_distance = (float)grad_x.at<uchar>(point.y, point.x);
-    //float y_distance = (float)grad_y.at<uchar>(point.y, point.x);
-
-    return  sqrt(pow(x_distance, 2) + pow(y_distance, 2));
+    float x_distance = image_gray_blur_pad.at<float>(point.y, point.x + 1) - image_gray_blur_pad.at<float>(point.y, point.x - 1);
+    float y_distance = image_gray_blur_pad.at<float>(point.y + 1, point.x) - image_gray_blur_pad.at<float>(point.y - 1, point.x);
+    return sqrt(x_distance * x_distance + y_distance * y_distance);
 }
-float get_orientation(Mat image_gray_blur_pad, Mat grad_x, Mat grad_y, Point point) {
-    /*
-    * input: image and coordinate x y
-    * algorithm:
-    *         atan2((L(x+1,y) - L(x-1,y))^2 + (L(x, y+1) - L(x, y-1))^2)
-    * output: \theta (x,y)
-    */
-    //cout << "image_gray_blur_pad.at<float>(point.y, point.x + 1 )" << (float)image_gray_blur_pad.at<uchar>(point.y, point.x + 1 ) << endl;
-    //cout << "image_gray_blur_pad.at<float>(point.y, point.x - 1)" << (float)image_gray_blur_pad.at<uchar>(point.y, point.x - 1) << endl;
-    float x_distance = (float)image_gray_blur_pad.at<uchar>(point.y, point.x + 1) - (float)image_gray_blur_pad.at<uchar>(point.y, point.x - 1);
-    float y_distance = (float)image_gray_blur_pad.at<uchar>(point.y + 1, point.x) - (float)image_gray_blur_pad.at<uchar>(point.y - 1, point.x);
-    //float x_distance = (float)grad_x.at<uchar>(point.y, point.x);
-    //float y_distance = (float)grad_y.at<uchar>(point.y, point.x);
-    float radius = atan2(y_distance, x_distance);
-    float orientation = -1;
 
-    //cout << "x_distance: " << x_distance << "y_distance " << y_distance << endl;
-    for (int i = 0;i < 9;i++) {
-        if (radius < 0) {
-            radius += 2 * PI;
-        }
-        if (ORIENTATION[i] <= radius && radius < ORIENTATION[i + 1]) {
+int get_orientation(const Mat& image_gray_blur_pad, const Mat& grad_x, const Mat& grad_y, const Point& point){
+    // 以 float 型別存取，中心差分計算梯度
+    float x_distance = image_gray_blur_pad.at<float>(point.y, point.x + 1) - image_gray_blur_pad.at<float>(point.y, point.x - 1);
+    float y_distance = image_gray_blur_pad.at<float>(point.y + 1, point.x) - image_gray_blur_pad.at<float>(point.y - 1, point.x);
+
+    // 計算梯度方向（弧度）
+    float angle = atan2(y_distance, x_distance);
+    if (angle < 0) angle += 2 * PI; // 正規化到 [0, 2PI)
+
+    // 找到對應的方向 bin（0~7）
+    int orientation = 0;
+    for (int i = 0; i < 8; ++i) {
+        if (ORIENTATION[i] <= angle && angle < ORIENTATION[i + 1]) {
             orientation = i;
             break;
         }
-        if (i == 8) {
-            cout << radius << endl;
-            exit(1);
-        }
     }
-   // namedWindow("grad_x", WINDOW_AUTOSIZE);
-   // namedWindow("grad_y", WINDOW_AUTOSIZE);
-    //imshow("Display_1", grad_x);
-    //imshow("Display_2", grad_y);
-    //waitKey(0);
-   // destroyAllWindows();
-    //cout << "orientation: " << orientation << endl;
+
     return orientation;
 }
+vector<float> get_orientation_vector(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, const Point& point, float weight){
 
-vector<float> add_orientation_vector(vector<float> p1, vector<float> p2) {
-    //cout << "add_orientation_vector" << endl;
-    vector<float> output(8,0);
-    for (int i = 0;i < 8;i++) {
-        output[i] = p1[i] + p2[i];
+    float magnitude = get_magnitude(image_gray_blur_pad, grad_x_pad, grad_y_pad, point);
+    int orientation = static_cast<int>(get_orientation(image_gray_blur_pad, grad_x_pad, grad_y_pad, point));
+    vector<float> orientation_vector(8, 0.0f);
+
+    if (orientation >= 0 && orientation < 8) {
+        orientation_vector[orientation] += magnitude * weight;
     }
-    
-    return output;
-}
-vector<float> get_orientation_vector(Mat image_gray_blur_pad, Mat grad_x_pad, Mat grad_y_pads, Point point, float weight) {
-    //cout << "get_orientation_vector" << endl;
-    float magnitude = get_magnitude(image_gray_blur_pad, grad_x_pad, grad_y_pads, point);
-    //float magnitude = 1;
-    float orientation = get_orientation(image_gray_blur_pad, grad_x_pad, grad_y_pads, point);
-    vector<float> orientation_vector(8, 0);
-    orientation_vector[orientation] = orientation_vector[orientation] + magnitude * weight;
-    //print_vecotr(orientation_vector, "orientation_vector");
+
     return orientation_vector;
 }
-vector<float> get_group_orientation_vector(Mat image_gray_blur_pad, Mat grad_x_pad, Mat grad_y_pad, Point left_top_point) {
-    /*
-    * input:
-        - image, keypoints
-    * algorithm:
-    *   - padding the image
-    *   - find all keypoints descriptor
-    * output:
-        - [[Point, orientation_]...[...]] (N,2,(2, 128))
-    */
-    vector<float> group_orientation_vector(8, 0), orientation_vector;
+vector<float> get_group_orientation_vector(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, Point left_top_point) {
+    // 8 維方向直方圖，初始為 0
+    vector<float> group_hist(8, 0.0f);
 
-    for (int i = left_top_point.x;i < left_top_point.x + 4;i++) {
-        for (int j = left_top_point.y;j < left_top_point.y + 4;j++) {
-            //cout << i << " " << j << endl;
-            Point point(i, j);
-            //cout << point << endl;
-            //float offset_x = (float)i - (float)(left_top_point.x + left_top_point.x + 4) / 2;
-            //float offset_y = (float)j - (float)(left_top_point.y + left_top_point.y + 4) / 2;
-            //float scale_factor = 1.5;
-            //float scale = scale_factor * 2 / pow(2, (1));
-            //float weight_factor = -0.5 / (scale * scale);
-            //float weight = exp(weight_factor * (offset_x * offset_x + offset_y * offset_y));
-            orientation_vector = get_orientation_vector(image_gray_blur_pad, grad_x_pad, grad_y_pad, point, 1);
-            group_orientation_vector = add_orientation_vector(group_orientation_vector, orientation_vector);
-            //print_vecotr(orientation_vector, "orientation_vector");
-        }
-    }
-    //print_vecotr(group_orientation_vector, "group_orientation_vector");
-    return group_orientation_vector;
-}
-descriptor get_descriptor(Mat image_gray_blur_pad, Mat grad_x_pad, Mat grad_y_pad, Point keypoint) {
-    //cout << "get_descriptor" << endl;
-    /*
-    * input:
-        - keypoint
-    * algorithm:
-    *   - traverse 16x16 pixel (keypoint is center)
-    *   - each step set as 2
-    * output:
-        - descipter (this point, orientation vector)
-    */
-    keypoint.x = keypoint.x + 9;
-    keypoint.y = keypoint.y + 9;
-    descriptor output;
-    for (int bias_x = keypoint.x - 8; bias_x < keypoint.x + 8; bias_x += 4) {
-        for (int bias_y = keypoint.y - 8; bias_y < keypoint.y + 8; bias_y += 4) {
-            //cout << bias_x << " " << bias_y << endl;
-            vector<float> group_orientation_vector;
-            Point point(bias_x, bias_y);
-            group_orientation_vector = get_group_orientation_vector(image_gray_blur_pad, grad_x_pad, grad_y_pad, point);
-            output.orientation_vector.insert(output.orientation_vector.end(), group_orientation_vector.begin(), group_orientation_vector.end());
-            //cout << "output.orientation_vector.size(): " << output.orientation_vector.size() << endl;
-        }
-    }
-    int max_element_index = max_element(output.orientation_vector.begin(), output.orientation_vector.end()) - output.orientation_vector.begin();
-    float _max_element = *max_element(output.orientation_vector.begin(), output.orientation_vector.end());
-    // Normalize
-    
-    if (_max_element != 0) {
-        float L2_sum = 0;
-        float threshold = 0.2;
-        for (int i = 0;i < output.orientation_vector.size();i++) {
-            //output.orientation_vector[i] = output.orientation_vector[i] / _max_element;
-            L2_sum += output.orientation_vector[i] * output.orientation_vector[i];
-            
-            // output.orientation_vector[i] = round(output.orientation_vector[i] * 100) / 100;
-        }
-        L2_sum = sqrt(L2_sum);
-        //cout << "L2_sum: " << L2_sum << endl;
-        for (int i = 0;i < output.orientation_vector.size();i++) {
-            output.orientation_vector[i] = output.orientation_vector[i] / L2_sum;
-            if (output.orientation_vector[i] > threshold) {
-               output.orientation_vector[i] = threshold;
+    for (int i = left_top_point.x; i < left_top_point.x + 4; ++i) {
+        for (int j = left_top_point.y; j < left_top_point.y + 4; ++j) {
+            Point pt(i, j);
+            vector<float> hist = get_orientation_vector(image_gray_blur_pad, grad_x_pad, grad_y_pad, pt, 1.0f);
+            // 直接累加
+            for (int k = 0; k < 8; ++k) {
+                group_hist[k] += hist[k];
             }
         }
-        
     }
-    
-    // rotate
-    //print_vecotr(output.orientation_vector, "bEFORE output.orientation_vector: ");
-    if (max_element_index != 0) {
-        //rotate
+    return group_hist;
+}
+
+descriptor get_descriptor(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, Point keypoint) {
+    // 將 keypoint 平移到 padding 後的位置
+    Point center = keypoint + Point(9, 9);
+    descriptor output;
+    output.point = keypoint; // 保留原始座標
+
+    // 16x16 區域分成 4x4 小區塊，每塊 4x4
+	// 每個小區塊計算 8 維向量
+	// 最後組合成 128 維向量的描述子(descriptor)
+    for (int dx = -8; dx < 8; dx += 4) {
+        for (int dy = -8; dy < 8; dy += 4) {
+            Point block_topleft = center + Point(dx, dy);
+            vector<float> hist = get_group_orientation_vector(image_gray_blur_pad, grad_x_pad, grad_y_pad, block_topleft);
+            output.orientation_vector.insert(output.orientation_vector.end(), hist.begin(), hist.end());
+        }
+    }
+
+    // L2 normalization + 截斷
+    float norm = 0.0f;
+    for (float v : output.orientation_vector) norm += v * v;
+    norm = sqrt(norm);
+    if (norm > 0) {
+        for (float& v : output.orientation_vector) {
+            v /= norm;
+            if (v > 0.2f) v = 0.2f;
+        }
+        // 再次 L2 normalization（SIFT 標準流程）
+        norm = 0.0f;
+        for (float v : output.orientation_vector) norm += v * v;
+        norm = sqrt(norm);
+        if (norm > 0) for (float& v : output.orientation_vector) v /= norm;
+    }
+
+    // 主方向循環平移
+    auto max_it = max_element(output.orientation_vector.begin(), output.orientation_vector.end());
+    int max_idx = static_cast<int>(distance(output.orientation_vector.begin(), max_it));
+    if (max_idx != 0) {
         rotate(output.orientation_vector.begin(),
-            output.orientation_vector.begin() + max_element_index, // this will be the new first element
+            output.orientation_vector.begin() + max_idx,
             output.orientation_vector.end());
     }
-    
-    //error detect
-    /*
-    for (int i = 0;i < output.orientation_vector.size();i++) {
-        if (output.orientation_vector[i] > 1 || output.orientation_vector[i]<0) {
-            cout << output.orientation_vector[i] << endl;
-            exit(2);
-        }
-         
-    }
-    */
-    //print_vecotr(output.orientation_vector, "AFTER output.orientation_vector: ");
-    keypoint.x = keypoint.x - 9;
-    keypoint.y = keypoint.y - 9;
-    output.point = keypoint;
+
     return output;
 }
+
 vector<descriptor> get_all_descipter(Mat image_gray_blur, Mat grad_x, Mat grad_y, vector<Point> keypoints) {
     /*
     * input:
@@ -300,17 +240,21 @@ vector<descriptor> get_all_descipter(Mat image_gray_blur, Mat grad_x, Mat grad_y
     vector<descriptor> output;
     //Mat image_gray_blur_pad;
     Mat grad_x_pad, grad_y_pad, image_gray_blur_pad;
-    //cout << "get all descripter" << endl;
+
     // 做 padding
+	// 這裡的 padding 是為了讓每個 keypoint 都能在 16x16 的區域內
     copyMakeBorder(grad_x, grad_x_pad, 9, 9, 9, 9, BORDER_CONSTANT, Scalar(0));
     copyMakeBorder(grad_y, grad_y_pad, 9, 9, 9, 9, BORDER_CONSTANT, Scalar(0));
     copyMakeBorder(image_gray_blur, image_gray_blur_pad, 9, 9, 9, 9, BORDER_CONSTANT, Scalar(0));
+    //
+
     for (Point keypoint : keypoints) {
         descriptor tmp_descipter;
         tmp_descipter = get_descriptor(image_gray_blur_pad, grad_x_pad, grad_y_pad, keypoint);
         output.push_back(tmp_descipter);
     }
-    //print_vecotr(tmp_descipter, "tmp_descipter");
+
+
     return output;
 }
 
@@ -353,48 +297,104 @@ float cal_dis(descriptor d_1, descriptor d_2) {
     return dis;
 }
 /*==================== match keypoints ===================*/
-vector<pair<int, int>> get_match_keypoints(vector<descriptor> descriptor_image_1, vector<descriptor>descriptor_image_2) {
-    /*
-    * input: image, point
-    * algorithm:
-    *   - calculate the 16x16 from keypoint. Divide it into four block each block have 4x4 pixels. Each block need to do:
-    *       - break a 4x4 block into 2x2 group, each group need to do:
-    *           - add up the magnitude according to the magnitude
-    * output: descriptor (128 dimensions vector)
-    */
-    vector<pair<int, int>> output;
-    int count = 0;
-    for (int i = 0; i < descriptor_image_1.size();i++) {
-        descriptor d_1 = descriptor_image_1[i];
-        float global_min = 10000000;
-        pair<int, int> match_keypoint;
-        for (int j = 0; j < descriptor_image_2.size();j++) {
-            count++;
-            descriptor d_2 = descriptor_image_2[j];
-            bool is_equal = equal(d_1.orientation_vector.begin(), d_1.orientation_vector.end(), d_2.orientation_vector.begin());
-            //cout << "d_1: " << d_1.point << " d_2: " << d_2.point << " " << cal_dis(d_1, d_2) << endl;
-            float local_min = 0;
-            
-            local_min = cal_dis(d_1, d_2);
+// 匹配點結構
+struct MatchPair {
+    int idx1;
+    int idx2;
+};
 
-            if (local_min <  global_min  ) {
-                global_min = local_min;
-                match_keypoint.first = i;
-                match_keypoint.second = j;
+// 計算單應性矩陣（用 OpenCV findHomography 也可）
+Mat computeHomography(const vector<Point2f>& src, const vector<Point2f>& dst) {
+    return findHomography(src, dst, 0);
+}
+// RANSAC 版本的 get_match_keypoints
+vector<pair<int, int>> get_match_keypoints(
+    const vector<descriptor>& descriptor_image_1,
+    const vector<descriptor>& descriptor_image_2,
+    int ransac_iter = 10000,
+    float match_threshold = 0.5,
+    float ransac_inlier_threshold = 3.0f)
+{
+	cout << "get_match_keypoints" << endl;
+
+    int max_desc = 300;
+    int n1 = min((int)descriptor_image_1.size(), max_desc);
+    int n2 = min((int)descriptor_image_2.size(), max_desc);
+
+    // 1. 初步最近鄰匹配
+	cout << descriptor_image_1.size() << " " << descriptor_image_2.size() << endl;
+    vector<MatchPair> initial_matches;
+    for (int i = 0; i < n1; ++i) {
+        float min_dist = 1e9;
+        int min_j = -1;
+        for (int j = 0; j < n2; ++j) {
+            float dist = cal_dis(descriptor_image_1[i], descriptor_image_2[j]);
+            if (dist < min_dist) {
+                min_dist = dist;
+                min_j = j;
             }
         }
-        if (global_min < 0.25) {
-            //cout << "global_min: " << global_min << endl;
-            output.push_back(match_keypoint);
+        if (min_dist < match_threshold) {
+            initial_matches.push_back({ i, min_j });
         }
-        else {
-            //cout << "global_min: " << global_min << endl;
-        }
-        
     }
-    //cout << count << endl;
+    if (initial_matches.size() < 4) return {}; // 不足4組無法RANSAC
+
+    // 2. RANSAC 主流程
+    int best_inlier_count = 0;
+    vector<MatchPair> best_inliers;
+    random_device rd;
+    mt19937 gen(rd());
+
+    for (int iter = 0; iter < ransac_iter; ++iter) {
+		cout << "RANSAC iteration: " << iter + 1 << "/" << ransac_iter << "\r" << flush;
+        // 隨機選4組配對
+        vector<int> indices(initial_matches.size());
+        iota(indices.begin(), indices.end(), 0);
+        shuffle(indices.begin(), indices.end(), gen);
+
+        vector<Point2f> src_pts, dst_pts;
+        for (int k = 0; k < 4; ++k) {
+            int idx = indices[k];
+            src_pts.push_back(descriptor_image_1[initial_matches[idx].idx1].point);
+            dst_pts.push_back(descriptor_image_2[initial_matches[idx].idx2].point);
+        }
+        Mat H = computeHomography(src_pts, dst_pts);
+        if (H.empty()) continue;
+
+        // 計算所有配對的 inlier 數
+        vector<MatchPair> inliers;
+        for (const auto& match : initial_matches) {
+            Point2f pt1 = descriptor_image_1[match.idx1].point;
+            Point2f pt2 = descriptor_image_2[match.idx2].point;
+            // 轉換 pt1
+            Mat pt1_h = (Mat_<double>(3, 1) << pt1.x, pt1.y, 1.0);
+            Mat pt2_proj = H * pt1_h;
+            if (fabs(pt2_proj.at<double>(2, 0)) < 1e-6) continue;
+            pt2_proj /= pt2_proj.at<double>(2, 0);
+            float dx = pt2.x - pt2_proj.at<double>(0, 0);
+            float dy = pt2.y - pt2_proj.at<double>(1, 0);
+            float error = sqrt(dx * dx + dy * dy);
+            if (error < ransac_inlier_threshold) {
+                inliers.push_back(match);
+            }
+        }
+        if (inliers.size() > best_inlier_count) {
+            best_inlier_count = static_cast<int>(inliers.size());
+            best_inliers = inliers;
+        }
+    }
+
+    // 3. 回傳最佳 inlier 配對
+    vector<pair<int, int>> output;
+    for (const auto& match : best_inliers) {
+        output.emplace_back(match.idx1, match.idx2);
+    }
     return output;
 }
+
+
+
 /*==================== evaluate_coorspondences ===================*/
 int evaluate_coorspondences() {
 
@@ -685,67 +685,154 @@ int main() {
  //   imwrite("keypoints_1.jpg", black_image_1);
 	//imwrite("keypoints_2.jpg", black_image_2);
 
+	// calculate SIFT descriptor
+	vector<descriptor> descriptor_image_1, descriptor_image_2;
 
-    //auto detected_end = chrono::steady_clock::now();
-    //auto detected_elapsed = chrono::duration<double>(detected_end - detected_begin);
-    //cout << "detected: " << detected_elapsed.count() << " seconds" << endl;
+    descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
+    descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
 
-    //auto matched_begin = chrono::steady_clock::now();
-    //descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
-    //descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
-    //match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
-    //auto matched_end = chrono::steady_clock::now();
-    //auto matched_elapsed = chrono::duration<double>(matched_end - matched_begin);
-    //cout << "Matched time: " << matched_elapsed.count() << " seconds" << endl;
+	//vector<pair<int, int>> match_kepoints;
+ //   match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
+
+ //   // 1. 轉成 KeyPoint 格式
+ //   vector<KeyPoint> keypoints1, keypoints2;
+ //   for (const auto& pt : keypoints_1) keypoints1.push_back(KeyPoint(pt, 1.f));
+ //   for (const auto& pt : keypoints_2) keypoints2.push_back(KeyPoint(pt, 1.f));
+
+ //   // 2. 轉成 DMatch 格式
+ //   vector<DMatch> good_matches;
+ //   for (const auto& match : match_kepoints) {
+ //       good_matches.push_back(DMatch(match.first, match.second, 0));
+ //       cout << "Matched KeyPoint Image 1 Index: " << match.first 
+	//		<< " with Image 2 Index: " << match.second << endl;
+ //   }
+
+ //   
+ //   // 3. 繪製匹配結果
+ //   Mat img_matches;
+ //   drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
+ //       Scalar::all(-1), Scalar::all(-1), vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
 
-    //cout << "matched: " << match_kepoints.size() << endl;
-    //vector<KeyPoint> keypoints1, keypoints2;
-    //Mat img_matches;
-    //
-    //vector< DMatch >good_matches;
-    //for (size_t i = 0; i < keypoints_1.size(); i++) {
-    //    keypoints1.push_back(KeyPoint(keypoints_1[i], 1.f));
-    //}
-    //for (size_t i = 0; i < keypoints_2.size(); i++) {
-    //    keypoints2.push_back(KeyPoint(keypoints_2[i], 1.f));
-    //}
-    //for (size_t i = 0; i < match_kepoints.size(); i++) {
-    //    int query_index = match_kepoints[i].first;
-    //    int target_index = match_kepoints[i].second;
-    //    //float distance = keypoints_1[query_index].x - keypoints_2[target_index].x
-    //    DMatch tmp_match(query_index, target_index, 0);
-    //    good_matches.push_back(tmp_match);
-    //}
+ //   //imshow("matches", img_matches);
+ //   //imwrite("matches.jpg", img_matches);
+ //   //waitKey(0);
 
-   
-    //drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches, Scalar::all(-1),
-    //    Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-    //
+ //   // 1. 從 good_matches 取得配對點
+ //   vector<Point2f> pts1, pts2;
+ //   for (const auto& m : good_matches) {
+ //       pts1.push_back(keypoints1[m.queryIdx].pt);
+ //       pts2.push_back(keypoints2[m.trainIdx].pt);
+ //   }
 
-    //vector<KeyPoint> match_list_1, match_list_2;
-    //for (int i = 0;i < good_matches.size();i++) {
-    //    KeyPoint source = keypoints1[good_matches[i].queryIdx];
-    //    KeyPoint destination = keypoints2[good_matches[i].trainIdx];
-    //    match_list_1.push_back(source);
-    //    match_list_2.push_back(destination);
-    //}
-    //
-    ////Mat h =  findHomography(match_list_1, match_list_2, 0);
-    ////Mat Homorgraphic = transform(keypoints1,  keypoints2, good_matches);
-    //Mat new_image;
-    //new_image = transform_test(image_1, image_2, match_list_1, match_list_2);
-   
-    //auto total_end = chrono::steady_clock::now();
-    //auto total_elapsed = chrono::duration<double>(total_end - total_begin);
-    //cout << "total: " << total_elapsed.count() << " seconds" << endl;
+ //   // 2. 用 RANSAC 找單應性矩陣
+ //   Mat H = findHomography(pts1, pts2, RANSAC);
 
-    //namedWindow("my", 0);
-    //resizeWindow("my", new_image.size() / 4);
-    //imshow("my", new_image);
-    //imwrite("result.jpg", new_image);
-    //waitKey(0);
-    //destroyAllWindows();
+ //   // 3. 影像拼接
+ //   Mat result;
+ //   warpPerspective(image_1, result, H,
+ //       Size(image_1.cols + image_2.cols, max(image_1.rows, image_2.rows)));
+ //   Mat roi(result, Rect(0, 0, image_2.cols, image_2.rows));
+ //   image_2.copyTo(roi);
+
+ //   // 4. 顯示與儲存
+ //   Mat result_small;
+ //   resize(result, result_small, Size(), 0.33, 0.33);
+ //   imshow("stitch", result_small);
+ //   imwrite("stitch.jpg", result);
+ //   waitKey(0);
+
+    // 假設 descriptor_image_1, descriptor_image_2 都是 vector<descriptor>
+    int n1 = descriptor_image_1.size();
+    int n2 = descriptor_image_2.size();
+
+
+    Mat desc1_mat(n1, 128, CV_32F);
+    Mat desc2_mat(n2, 128, CV_32F);
+    for (int i = 0; i < n1; ++i)
+        memcpy(desc1_mat.ptr<float>(i), descriptor_image_1[i].orientation_vector.data(), 128 * sizeof(float));
+    for (int i = 0; i < n2; ++i)
+        memcpy(desc2_mat.ptr<float>(i), descriptor_image_2[i].orientation_vector.data(), 128 * sizeof(float));
+
+
+    BFMatcher matcher(NORM_L2);
+    vector<DMatch> matches;
+    matcher.match(desc1_mat, desc2_mat, matches);
+
+    // 可選：根據距離過濾
+    double min_dist = 1e9, max_dist = 0;
+    for (const auto& m : matches) {
+        min_dist = min(min_dist, (double)m.distance);
+        max_dist = max(max_dist, (double)m.distance);
+    }
+    vector<DMatch> good_matches;
+    for (const auto& m : matches) {
+        if (m.distance <= max(2 * min_dist, 0.3)) { // 0.3 可依實際情況調整
+            good_matches.push_back(m);
+        }
+    }
+
+
+    // 轉成 KeyPoint 格式
+    vector<KeyPoint> keypoints1, keypoints2;
+    for (const auto& d : descriptor_image_1) keypoints1.push_back(KeyPoint(d.point, 1.f));
+    for (const auto& d : descriptor_image_2) keypoints2.push_back(KeyPoint(d.point, 1.f));
+
+    Mat img_matches;
+    drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
+        Scalar::all(-1), Scalar::all(-1), vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+
+    namedWindow("matches", WINDOW_NORMAL); // 允許調整視窗大小
+    resizeWindow("matches", 800, 600);    // 設定視窗大小為 800x600
+    imshow("matches", img_matches);
+    imwrite("matches.jpg", img_matches);
+    waitKey(0);
+
+
+    vector<Point2f> pts1, pts2;
+    for (const auto& m : good_matches) {
+        pts1.push_back(keypoints1[m.queryIdx].pt);
+        pts2.push_back(keypoints2[m.trainIdx].pt);
+    }
+    if (pts1.size() >= 4 && pts2.size() >= 4) {
+        Mat H = findHomography(pts1, pts2, RANSAC);
+        if (!H.empty() && H.rows == 3 && H.cols == 3) {
+            Mat result;
+            warpPerspective(image_1, result, H, Size(image_1.cols + image_2.cols, max(image_1.rows, image_2.rows)));
+            Mat roi(result, Rect(0, 0, image_2.cols, image_2.rows));
+            image_2.copyTo(roi);
+            //imshow("stitch", result);
+			
+            // 1. 轉成灰階（如果是彩色圖）
+            Mat gray;
+            if (result.channels() == 3)
+                cvtColor(result, gray, COLOR_BGR2GRAY);
+            else
+                gray = result;
+
+            // 2. 產生二值遮罩（非黑為 255，黑為 0）
+            Mat mask;
+            threshold(gray, mask, 1, 255, THRESH_BINARY);
+
+            // 3. 找出所有非黑像素座標
+            vector<Point> points;
+            findNonZero(mask, points);
+
+            // 4. 計算最小包圍盒
+            Rect bbox = boundingRect(points);
+
+            // 5. 裁切
+            Mat cropped = result(bbox);
+
+            // 6. 儲存
+            imwrite("stitch_cropped.jpg", cropped);
+            imshow("stitch_cropped", cropped);
+            waitKey(0);
+        }
+        else {
+            cout << "Homography matrix H is invalid!" << endl;
+        }
+    }
     return 0;
     
 }

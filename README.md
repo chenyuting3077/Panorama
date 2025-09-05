@@ -10,6 +10,7 @@
    
 2. **特徵點描述（Describe Keypoints）**  
    - 使用 **SIFT 描述子** 將每個角點的局部梯度訊息編碼成向量。  
+	- (Note: SIFT 原先使用 DOG 找特徵點)
    - 生成 128 維 descriptor，使特徵點具有旋轉與尺度不變性。
    
 3. **特徵點匹配（Match Keypoints）**  
