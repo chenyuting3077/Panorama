@@ -34,3 +34,17 @@ Harris ¨¤ÂIÀË´ú¾¹¬O¤@ºØ°ò©ó¼v¹³±è«×ªº¨¤ÂIÀË´ú¤èªk¡C¨ä®Ö¤ß«ä·Q¬O§Q¥Î¼v¹³¦b¤£¦P¤è¦
 1. **­pºâ¼v¹³±è«×**  
    ¨Ï¥Î Sobel Filter ­pºâ¼v¹³¦b x ©M y ¤è¦Vªº±è«× (Ãä½tÀË´ú)¡A¤À§O±o¨ì Ix ©M Iy¡C
    
+
+
+
+
+## Todo List
+- [x] Harris Corner Detection
+	- [ ] Switch to DOG
+- [x] SIFT Descriptor
+- [x] Feature Matching
+- [x] RANSAC
+- [ ] Homography
+- [ ] Image Warping
+- [ ] Image Blending
+- [ ] Documentation

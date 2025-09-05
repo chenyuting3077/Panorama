@@ -393,244 +393,6 @@ vector<pair<int, int>> get_match_keypoints(
     return output;
 }
 
-
-
-/*==================== evaluate_coorspondences ===================*/
-int evaluate_coorspondences() {
-
-}
-/*==================== transform===================*/
-Mat transform(vector<KeyPoint> keypoints1, vector<KeyPoint> keypoints2, vector< DMatch > good_matches) {
-    /*
-    input: four source point and four distination point
-    output: transformation matrix
-    */
-}
-
-Mat find_homography_(vector<KeyPoint> keypoints1, vector<KeyPoint> keypoints2){
-    /*
-    * input: four matched point
-    * output: homography matrix
-    */
-    //cout << "find_homography_" << endl;
-    Mat min_eigen_vec;
-    Mat2d A;
-    for (int i = 0;i < 4;i++) {
-        Point source = keypoints1[i].pt;
-        Point destination = keypoints2[i].pt;
-
-        //cout << source << " " << destination << endl;
-        Mat tmp =
-            (Mat_<double>(2, 9) <<
-                source.x, source.y, 1, 0, 0, 0, -destination.x * source.x, -destination.x * source.y, -destination.x,
-                0, 0, 0, source.x, source.y, 1, -destination.y * source.x, -destination.y * source.y, -destination.y);
-
-        //vconcat(output, tmp, output);
-        A.push_back(tmp);
-    }
-    A = A.t() * A;
-    //cout << "A.t() * A; " << A.size() << endl;
-    Mat U, W, Vt;
-
-   // Vt.convertTo(Vt, CV_64F);
-    //U.convertTo(U, CV_64F);
-    //W.convertTo(W, CV_64F);
-    //min_eigen_vec.convertTo(min_eigen_vec, CV_64F);
-    //做 SVD 分解
-    SVD::compute(A, W, U, Vt);
-    min_eigen_vec = Vt.row(Vt.rows - 1);
-    min_eigen_vec = min_eigen_vec * (1 / min_eigen_vec.at<double>(0, 8));
-    min_eigen_vec = min_eigen_vec.reshape(0, 3);
-
-    //cout << min_eigen_vec << endl;
-    return min_eigen_vec;
-}
-
-
-Mat transform_test(Mat image_1, Mat image_2, vector<KeyPoint> keypoints1_all, vector<KeyPoint> keypoints2_all) {
-    /*
-    input: matched point point and four distination point
-    output: transformation matrix
-    */
-    /*
-    vector<KeyPoint> keypoints1_all;
-    vector<KeyPoint> keypoints2_all;
-    vector<Point> points1_all;
-    vector<Point> points2_all;
-    vector< DMatch > good_matches;
-
-    Mat image_1 = imread("C:/Users/Allen/Desktop/HW2/01.JPG", CV_8U);
-    Mat image_2 = imread("C:/Users/Allen/Desktop/HW2/02.JPG", CV_8U);
-   
-    ifstream matched("matched.txt");
-    string line;
-    for(int i=0;i< {
-        
-        stringstream ss;
-        float source_x = 0, source_y=0;
-        float des_x = 0, des_y = 0;
-
-        ss << line;
-        ss >> source_x >> source_y >> des_x >> des_y;
-        KeyPoint source, des;
-        Point source_pt(source_x, source_y), des_pt(des_x, des_y);
-        source.pt = source_pt;
-        des.pt = des_pt;
-        keypoints1_all.push_back(source);
-        keypoints2_all.push_back(des);
-        points1_all.push_back(source_pt);
-        points2_all.push_back(des_pt);
-    }
-    */
-    Mat min_eigen_vec, h, min_eigen_vec_inverse;
-    /*========================================================================*/
-    /*
-    * RANSAC
-    * input: keypoint list
-    * output: homorgrphy
-    * 1. random choose the 4 point.
-    * 2. compute homorgrphic
-    * 3. compute the error
-    *
-    */
-    auto RANSAC_begin = chrono::steady_clock::now();
-    
-    
-    Mat gloabl_homography_inv, gloabl_homography;
-    float global_dis = 1e9;
-    vector<Point> points1;
-    vector<Point> points2;
-    for (int i = 0;i < 2000;i++) {
-        /*random_get_four_matched_point
-        * 
-        * */
-        vector<KeyPoint> keypoints1;
-        vector<KeyPoint> keypoints2;
-        vector<Point> points1_tmp;
-        vector<Point> points2_tmp;
-        /*如果重複就break*/
-        vector<int> is_selected;
-        for (int j = 0;j < 4;j++) {
-            
-            
-            float dis_x, dis_y, dis;
-            bool is_random__near = true;
-            int index = -1;
-            //do not get so near & do tno repeat//
-            while (is_random__near) {
-                index = rand() % (keypoints1_all.size());
-
-                //太近
-                if (keypoints1.size() > 0) {
-                    for (int i = 0;i < keypoints1.size();i++) {
-                        //重複
-                        if ((keypoints1_all[index].pt.x == keypoints1[i].pt.x )|| 
-                            (keypoints1_all[index].pt.y == keypoints1[i].pt.y )||
-                            (keypoints2_all[index].pt.x == keypoints2[i].pt.x) ||
-                            (keypoints2_all[index].pt.y == keypoints2[i].pt.y)
-                            ) {
-                            ///cout << "is_repeat" << endl;
-                            is_random__near = true;
-                            break;
-                        }else {
-
-                            dis_x = keypoints1_all[index].pt.x - keypoints1_all[i].pt.x;
-                            dis_y = keypoints1_all[index].pt.y - keypoints1_all[i].pt.y;
-
-                            dis = sqrt(pow(dis_x, 2) + pow(dis_y, 2));
-                            
-                            if (dis > 10) {
-                                is_random__near = false;
-                            } 
-                            else{
-                                is_random__near = true;
-                                break;
-                            }
-                        }
-
-                    }
-                }
-                else {
-                    is_random__near = false;
-                }
-            }
-            is_selected.push_back(index);
-            keypoints1.push_back(keypoints1_all[index]);
-            keypoints2.push_back(keypoints2_all[index]);
-
-            points1_tmp.push_back(keypoints1_all[index].pt);
-            points2_tmp.push_back(keypoints2_all[index].pt);
-        }
-
-        min_eigen_vec = find_homography_(keypoints1, keypoints2);
-        //cout << min_eigen_vec_inverse << endl;
-        //計算誤差
-        float local_dis = 0;
-        for (int j = 0;j < keypoints1_all.size();j++) {
-            Point point = keypoints1_all[j].pt;
-            Mat new_point = (Mat_<double>(3, 1) << point.x, point.y, 1);
-            Mat old_point = min_eigen_vec * new_point;
-            old_point = old_point / old_point.at<double>(0, 2);
-            float old_x = (int)old_point.at<double>(0, 0);
-            float old_y = (int)old_point.at<double>(0, 1);
-            local_dis += sqrt(pow((keypoints2_all[j].pt.y - old_y),2) + pow(keypoints2_all[j].pt.x - old_x,2));
-        }
-        //cout << "local_dis " << local_dis <<  "global_dis " << global_dis << endl;
-        if (local_dis < global_dis) {
-            
-            points1 = points1_tmp;
-            points2 = points2_tmp;
-            gloabl_homography_inv = min_eigen_vec.inv();
-            gloabl_homography = min_eigen_vec;
-            global_dis = local_dis;
-        }
-    }
-    Mat new_image(image_1.rows, image_1.cols + image_2.cols, CV_8U);
-    image_2.copyTo(new_image);
-
-    
-    auto RANSAC_end = chrono::steady_clock::now();
-    auto RANSAC_elapsed = chrono::duration<double>(RANSAC_end - RANSAC_begin);
-    cout << "RANSAC: " << RANSAC_elapsed.count() << " seconds" << endl;
-    /*======================================================================*/
-    /*inverse mapping*/
-    auto Inverse_begin = chrono::steady_clock::now();
-
-    for (int i = 0;i < new_image.rows;i++) {
-        for (int j = 0;j < new_image.cols;j++) {
-            Point point(j, i);
-            Mat new_point = (Mat_<double>(3, 1) << point.x, point.y, 1);
-            Mat old_point = gloabl_homography_inv * new_point;
-            //Mat old_point = h_inv * new_point;
-            old_point = old_point / old_point.at<double>(0, 2);
-            float old_x = (int)old_point.at<double>(0, 0);
-            float old_y = (int)old_point.at<double>(0, 1);
-            if (old_x > 0 && old_y > 0 && old_x < image_1.cols && old_y < image_1.rows) {
-                if (new_image.at<uchar>(point.y, point.x) != 0) {
-                    new_image.at<uchar>(point.y, point.x) = (image_1.at<uchar>(old_y, old_x) + new_image.at<uchar>(point.y, point.x)) /2 ;
-                }
-                else {
-                    new_image.at<uchar>(point.y, point.x) = image_1.at<uchar>(old_y, old_x);
-                }
-                
-            }
-            
-        }
-    }
-
-    auto Inverse_end = chrono::steady_clock::now();
-    auto Inverse_elapsed = chrono::duration<double>(Inverse_end - Inverse_begin);
-
-    cout << "Inverse: " << Inverse_elapsed.count() << " seconds" << endl;
-    /*======================================================================*/
-    return new_image;
-}
-/*====================  blend ===================*/
-int blend() {
-
-}
-
-
 /*=============================== main function =============================*/
 int main() {
     //vector<pair<int, int>> match_kepoints;
@@ -691,148 +453,55 @@ int main() {
     descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
     descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
 
-	//vector<pair<int, int>> match_kepoints;
- //   match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
-
- //   // 1. 轉成 KeyPoint 格式
- //   vector<KeyPoint> keypoints1, keypoints2;
- //   for (const auto& pt : keypoints_1) keypoints1.push_back(KeyPoint(pt, 1.f));
- //   for (const auto& pt : keypoints_2) keypoints2.push_back(KeyPoint(pt, 1.f));
-
- //   // 2. 轉成 DMatch 格式
- //   vector<DMatch> good_matches;
- //   for (const auto& match : match_kepoints) {
- //       good_matches.push_back(DMatch(match.first, match.second, 0));
- //       cout << "Matched KeyPoint Image 1 Index: " << match.first 
-	//		<< " with Image 2 Index: " << match.second << endl;
- //   }
-
- //   
- //   // 3. 繪製匹配結果
- //   Mat img_matches;
- //   drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
- //       Scalar::all(-1), Scalar::all(-1), vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-
-
- //   //imshow("matches", img_matches);
- //   //imwrite("matches.jpg", img_matches);
- //   //waitKey(0);
-
- //   // 1. 從 good_matches 取得配對點
- //   vector<Point2f> pts1, pts2;
- //   for (const auto& m : good_matches) {
- //       pts1.push_back(keypoints1[m.queryIdx].pt);
- //       pts2.push_back(keypoints2[m.trainIdx].pt);
- //   }
-
- //   // 2. 用 RANSAC 找單應性矩陣
- //   Mat H = findHomography(pts1, pts2, RANSAC);
-
- //   // 3. 影像拼接
- //   Mat result;
- //   warpPerspective(image_1, result, H,
- //       Size(image_1.cols + image_2.cols, max(image_1.rows, image_2.rows)));
- //   Mat roi(result, Rect(0, 0, image_2.cols, image_2.rows));
- //   image_2.copyTo(roi);
-
- //   // 4. 顯示與儲存
- //   Mat result_small;
- //   resize(result, result_small, Size(), 0.33, 0.33);
- //   imshow("stitch", result_small);
- //   imwrite("stitch.jpg", result);
- //   waitKey(0);
-
-    // 假設 descriptor_image_1, descriptor_image_2 都是 vector<descriptor>
-    int n1 = descriptor_image_1.size();
-    int n2 = descriptor_image_2.size();
-
-
-    Mat desc1_mat(n1, 128, CV_32F);
-    Mat desc2_mat(n2, 128, CV_32F);
-    for (int i = 0; i < n1; ++i)
-        memcpy(desc1_mat.ptr<float>(i), descriptor_image_1[i].orientation_vector.data(), 128 * sizeof(float));
-    for (int i = 0; i < n2; ++i)
-        memcpy(desc2_mat.ptr<float>(i), descriptor_image_2[i].orientation_vector.data(), 128 * sizeof(float));
-
-
-    BFMatcher matcher(NORM_L2);
-    vector<DMatch> matches;
-    matcher.match(desc1_mat, desc2_mat, matches);
-
-    // 可選：根據距離過濾
-    double min_dist = 1e9, max_dist = 0;
-    for (const auto& m : matches) {
-        min_dist = min(min_dist, (double)m.distance);
-        max_dist = max(max_dist, (double)m.distance);
-    }
-    vector<DMatch> good_matches;
-    for (const auto& m : matches) {
-        if (m.distance <= max(2 * min_dist, 0.3)) { // 0.3 可依實際情況調整
-            good_matches.push_back(m);
-        }
-    }
-
-
-    // 轉成 KeyPoint 格式
+    vector<pair<int, int>> match_kepoints;
+    match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
+ 
+    // 1. 轉成 KeyPoint 格式
     vector<KeyPoint> keypoints1, keypoints2;
-    for (const auto& d : descriptor_image_1) keypoints1.push_back(KeyPoint(d.point, 1.f));
-    for (const auto& d : descriptor_image_2) keypoints2.push_back(KeyPoint(d.point, 1.f));
-
+    for (const auto& pt : keypoints_1) keypoints1.push_back(KeyPoint(pt, 1.f));
+    for (const auto& pt : keypoints_2) keypoints2.push_back(KeyPoint(pt, 1.f));
+ 
+    // 2. 轉成 DMatch 格式
+    vector<DMatch> good_matches;
+    for (const auto& match : match_kepoints) {
+        good_matches.push_back(DMatch(match.first, match.second, 0));
+    }
+ 
+    
+    // 3. 繪製匹配結果
     Mat img_matches;
     drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
         Scalar::all(-1), Scalar::all(-1), vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-
-    namedWindow("matches", WINDOW_NORMAL); // 允許調整視窗大小
-    resizeWindow("matches", 800, 600);    // 設定視窗大小為 800x600
-    imshow("matches", img_matches);
-    imwrite("matches.jpg", img_matches);
-    waitKey(0);
-
-
+ 
+    // 1. 從 good_matches 取得配對點
     vector<Point2f> pts1, pts2;
     for (const auto& m : good_matches) {
         pts1.push_back(keypoints1[m.queryIdx].pt);
         pts2.push_back(keypoints2[m.trainIdx].pt);
     }
-    if (pts1.size() >= 4 && pts2.size() >= 4) {
-        Mat H = findHomography(pts1, pts2, RANSAC);
-        if (!H.empty() && H.rows == 3 && H.cols == 3) {
-            Mat result;
-            warpPerspective(image_1, result, H, Size(image_1.cols + image_2.cols, max(image_1.rows, image_2.rows)));
-            Mat roi(result, Rect(0, 0, image_2.cols, image_2.rows));
-            image_2.copyTo(roi);
-            //imshow("stitch", result);
-			
-            // 1. 轉成灰階（如果是彩色圖）
-            Mat gray;
-            if (result.channels() == 3)
-                cvtColor(result, gray, COLOR_BGR2GRAY);
-            else
-                gray = result;
+ 
+    // 求 Homography 矩陣
+    Mat H = computeHomography(pts1, pts2);
+ 
+    // 3. 影像拼接
+    Mat result;
+    warpPerspective(image_1, result, H,
+        Size(image_1.cols + image_2.cols, max(image_1.rows, image_2.rows)));
+    Mat roi(result, Rect(0, 0, image_2.cols, image_2.rows));
+    image_2.copyTo(roi);
+ 
+    // 4. 顯示與儲存
+    int crop_width = result.cols / 2;
+    int crop_height = result.rows;
+    Rect crop_roi(0, 0, crop_width, crop_height);
+    Mat cropped = result(crop_roi);
 
-            // 2. 產生二值遮罩（非黑為 255，黑為 0）
-            Mat mask;
-            threshold(gray, mask, 1, 255, THRESH_BINARY);
+    // 顯示與儲存
+    imshow("stitch_cropped", cropped);
+    imwrite("stitch_cropped.jpg", cropped);
+    waitKey(0);
 
-            // 3. 找出所有非黑像素座標
-            vector<Point> points;
-            findNonZero(mask, points);
-
-            // 4. 計算最小包圍盒
-            Rect bbox = boundingRect(points);
-
-            // 5. 裁切
-            Mat cropped = result(bbox);
-
-            // 6. 儲存
-            imwrite("stitch_cropped.jpg", cropped);
-            imshow("stitch_cropped", cropped);
-            waitKey(0);
-        }
-        else {
-            cout << "Homography matrix H is invalid!" << endl;
-        }
-    }
+   
     return 0;
     
 }
