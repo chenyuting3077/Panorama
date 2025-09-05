@@ -65,7 +65,7 @@ Harris ½Çüc™zœyÆ÷ÊÇÒ»·N»ùì¶Ó°ÏñÌİ¶ÈµÄ½Çüc™zœy·½·¨¡£ÆäºËĞÄË¼ÏëÊÇÀûÓÃÓ°ÏñÔÚ²»Í¬·½Ï
 	- [ ] Switch to DOG
 - [x] SIFT Descriptor
 - [x] Feature Matching
-- [x] RANSAC
+- [ ] RANSAC
 - [ ] Homography
 - [ ] Image Warping
 - [ ] Image Blending
