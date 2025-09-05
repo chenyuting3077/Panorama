@@ -1,8 +1,15 @@
 # Panorama 全景影像拼接
 
-|                原圖1                |                原圖2                |                     拼接結果                      |
-| :---------------------------------: | :---------------------------------: | :-----------------------------------------------: |
-| <img src="HW2/01.JPG" width="350"/> | <img src="HW2/02.JPG" width="350"/> | <img src="HW2/Stitched_opencv.jpg" width="1000"/> |
+
+<table>
+   <tr>
+      <td align="center"><b>原圖1</b><br><img src="HW2/01.JPG" width="350"/></td>
+      <td align="center"><b>原圖2</b><br><img src="HW2/02.JPG" width="350"/></td>
+   </tr>
+   <tr>
+      <td colspan="2" align="center"><b>拼接結果</b><br><img src="HW2/Stitched_opencv.jpg" width="1000"/></td>
+   </tr>
+</table>
 
 ## 簡介
 全景影像（Panorama）常用於捕捉完整場景，尤其是在單張照片無法涵蓋整個景觀時。本專案透過 **影像拼接（Image Stitching）** 技術，將多張相同場景的影像合成一張完整的全景圖。  
