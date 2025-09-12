@@ -267,7 +267,7 @@ vector<pair<int, int>> get_match_keypoints(
     const vector<descriptor>& descriptor_image_1,
     const vector<descriptor>& descriptor_image_2,
     int ransac_iter = 10000,
-    float match_threshold = 0.2,
+    float match_threshold = 0.3,
     float ransac_inlier_threshold = 2.0f)
 {
 	//cout << "get_match_keypoints" << endl;
@@ -522,6 +522,6 @@ int main() {
     warpPerspective(image_2, result, H, Size(image_1.cols + image_2.cols, image_1.rows));
     image_1.copyTo(result(Rect(0, 0, image_1.cols, image_1.rows)));
 
-    
+    imwrite("image_1.jpg", result);
     return 0;
 }
