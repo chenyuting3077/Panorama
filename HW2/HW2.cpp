@@ -62,7 +62,7 @@ void my_sobel_y(const Mat& src, Mat& grad_y) {
 }
 
 // Harris 角點偵測：回傳所有角點座標
-vector<Point> my_harris_detector(const Mat& src, float threshold = 1e7) {
+vector<Point> my_harris_detector(const Mat& src, float threshold = 1e6) {
     // 1. 計算 x, y 方向梯度
     Mat grad_x, grad_y;
     my_sobel_x(src, grad_x);
@@ -266,12 +266,12 @@ Mat computeHomography(const vector<Point2f>& src, const vector<Point2f>& dst) {
 vector<pair<int, int>> get_match_keypoints(
     const vector<descriptor>& descriptor_image_1,
     const vector<descriptor>& descriptor_image_2,
-    int ransac_iter = 10000,
+    int ransac_iter = 20000,
     float match_threshold = 0.3,
     float ransac_inlier_threshold = 2.0f)
 {
 	//cout << "get_match_keypoints" << endl;
-
+    cout << descriptor_image_1.size() << " " << descriptor_image_2.size() << endl;
     int max_desc = 10000;
     int n1 = min((int)descriptor_image_1.size(), max_desc);
     int n2 = min((int)descriptor_image_2.size(), max_desc);
@@ -425,6 +425,32 @@ void SIFT() {
 
     //imwrite("Stitched_SIFT.jpg", result);
 }
+
+
+// 生成與影像大小相同的權重影像
+Mat generateWeightImage(const Size& size, bool isLeft) {
+    Mat weight(size, CV_32F);
+
+    for (int y = 0; y < size.height ; ++y) {
+        for (int x = 0; x < size.width ; ++x) {
+            float linearWeight = static_cast<float>(x) / size.width;
+            if (isLeft) {
+                // 左側影像的權重從 1 遞減到 0，使用平方根調整
+                weight.at<float>(y, x) = 1.0f - sqrt(linearWeight);
+            }
+            else {
+                // 右側影像的權重從 0 遞增到 1，使用平方根調整
+                weight.at<float>(y, x) = sqrt(linearWeight);
+            }
+        }
+    }
+    // 將單通道影像複製到三個通道
+    Mat weight3Channel;
+    vector<Mat> channels(3, weight); // 複製三份單通道影像
+    merge(channels, weight3Channel); // 合併為三通道影像
+
+    return weight3Channel;
+}
 /*=============================== main function =============================*/
 int main() {
     
@@ -518,10 +544,52 @@ int main() {
     }
 
     Mat H = findHomography(pts2, pts1, RANSAC);
-    Mat result;
-    warpPerspective(image_2, result, H, Size(image_1.cols + image_2.cols, image_1.rows));
-    image_1.copyTo(result(Rect(0, 0, image_1.cols, image_1.rows)));
+    Mat result_without_blending;
+    warpPerspective(image_2, result_without_blending, H, Size(image_1.cols + image_2.cols, image_1.rows));
+    // 將 image_1 複製到 blended 的左側
+    image_1.copyTo(result_without_blending(Rect(0, 0, image_1.cols, image_1.rows)));
+	imwrite("without_blened_result.jpg", result_without_blending);
 
-    imwrite("image_1.jpg", result);
+
+    Mat result;
+    // 確保影像類型一致
+    warpPerspective(image_2, result, H, Size(image_1.cols + image_2.cols, image_1.rows));
+    image_1.convertTo(image_1, CV_32FC3);
+    result.convertTo(result, CV_32FC3);
+
+    // 建立融合結果影像
+    Mat blended = Mat::zeros(result.size(), result.type());
+    Mat big_image_1 = Mat::zeros(result.size(), result.type());
+
+    // 將 image_1 複製到 big_image_1 的左側
+    int blend_start = max(0, image_1.cols - 500); // 確保範圍合法
+    int blend_end = min(result.cols, image_1.cols); // 確保範圍合法
+
+    image_1.copyTo(big_image_1(Rect(0, 0, image_1.cols, image_1.rows)));
+
+    // 線性混合
+    for (int y = 0; y < result.rows; ++y) {
+        for (int x = 0; x < result.cols; ++x) {
+            if (x < blend_start) {
+                // 左側影像完全保留
+                blended.at<Vec3f>(y, x) = big_image_1.at<Vec3f>(y, x);
+            }
+            else if (x >= blend_start && x < blend_end) {
+                // 線性混合區域
+                float alpha = static_cast<float>(x - blend_start) / (blend_end - blend_start); // 混合比例
+                blended.at<Vec3f>(y, x) = big_image_1.at<Vec3f>(y, x) * (1.0f - alpha) + result.at<Vec3f>(y, x) * alpha;
+            }
+            else {
+                // 右側影像完全保留
+                blended.at<Vec3f>(y, x) = result.at<Vec3f>(y, x);
+            }
+        }
+    }
+
+    // 將結果轉回 8 位元格式並保存
+    blended.convertTo(blended, CV_8U);
+    imwrite("blended_result_linear.jpg", blended);
+
+	//imwrite("Stitched.jpg", result);
     return 0;
 }
