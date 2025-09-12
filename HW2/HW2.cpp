@@ -122,44 +122,31 @@ public:
 
 
 float get_magnitude(Mat image_gray_blur_pad, Mat grad_x, Mat grad_y, Point point) {
-    /*
-    * input: image and coordinate x y
-    * algorithm:
-    *         squrt((L(x+1,y) - L(x-1,y))^2 + (L(x, y+1) - L(x, y-1))^2)
-    * output: m(x,y)
-    */
-
-    float x_distance = image_gray_blur_pad.at<float>(point.y, point.x + 1) - image_gray_blur_pad.at<float>(point.y, point.x - 1);
-    float y_distance = image_gray_blur_pad.at<float>(point.y + 1, point.x) - image_gray_blur_pad.at<float>(point.y - 1, point.x);
-    return sqrt(x_distance * x_distance + y_distance * y_distance);
+    // 直接使用預計算的梯度值
+    float x_grad = grad_x.at<float>(point.y, point.x);
+    float y_grad = grad_y.at<float>(point.y, point.x);
+    return sqrt(x_grad * x_grad + y_grad * y_grad);
 }
 
-int get_orientation(const Mat& image_gray_blur_pad, const Mat& grad_x, const Mat& grad_y, const Point& point){
-    // 以 float 型別存取，中心差分計算梯度
-    float x_distance = image_gray_blur_pad.at<float>(point.y, point.x + 1) - image_gray_blur_pad.at<float>(point.y, point.x - 1);
-    float y_distance = image_gray_blur_pad.at<float>(point.y + 1, point.x) - image_gray_blur_pad.at<float>(point.y - 1, point.x);
 
-    // 計算梯度方向（弧度）
-    float angle = atan2(y_distance, x_distance);
-    if (angle < 0) angle += 2 * PI; // 正規化到 [0, 2PI)
+int get_orientation(const Mat& image_gray_blur_pad, const Mat& grad_x, const Mat& grad_y, const Point& point) {
+    float x_grad = grad_x.at<float>(point.y, point.x);
+    float y_grad = grad_y.at<float>(point.y, point.x);
 
-    // 找到對應的方向 bin（0~7）
-    int orientation = 0;
-    for (int i = 0; i < 8; ++i) {
-        if (ORIENTATION[i] <= angle && angle < ORIENTATION[i + 1]) {
-            orientation = i;
-            break;
-        }
-    }
+    float angle = atan2(y_grad, x_grad);
+    if (angle < 0) angle += 2 * PI;
+
+    // 將角度量化到 8 個 bin（每個 π/4）
+    int orientation = static_cast<int>((angle * 8) / (2 * PI)) % 8;
 
     return orientation;
 }
-vector<float> get_orientation_vector(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, const Point& point, float weight){
 
+vector<float> get_orientation_vector(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, const Point& point, float weight) {
     float magnitude = get_magnitude(image_gray_blur_pad, grad_x_pad, grad_y_pad, point);
-    int orientation = static_cast<int>(get_orientation(image_gray_blur_pad, grad_x_pad, grad_y_pad, point));
-    vector<float> orientation_vector(8, 0.0f);
+    int orientation = get_orientation(image_gray_blur_pad, grad_x_pad, grad_y_pad, point);
 
+    vector<float> orientation_vector(8, 0.0f);
     if (orientation >= 0 && orientation < 8) {
         orientation_vector[orientation] += magnitude * weight;
     }
@@ -184,14 +171,11 @@ vector<float> get_group_orientation_vector(const Mat& image_gray_blur_pad, const
 }
 
 descriptor get_descriptor(const Mat& image_gray_blur_pad, const Mat& grad_x_pad, const Mat& grad_y_pad, Point keypoint) {
-    // 將 keypoint 平移到 padding 後的位置
     Point center = keypoint + Point(9, 9);
     descriptor output;
-    output.point = keypoint; // 保留原始座標
+    output.point = keypoint;
 
-    // 16x16 區域分成 4x4 小區塊，每塊 4x4
-	// 每個小區塊計算 8 維向量
-	// 最後組合成 128 維向量的描述子(descriptor)
+    // 16x16 區域分成 4x4 小區塊
     for (int dx = -8; dx < 8; dx += 4) {
         for (int dy = -8; dy < 8; dy += 4) {
             Point block_topleft = center + Point(dx, dy);
@@ -200,29 +184,24 @@ descriptor get_descriptor(const Mat& image_gray_blur_pad, const Mat& grad_x_pad,
         }
     }
 
-    // L2 normalization + 截斷
+    // L2 normalization + 截斷 + 再次正規化
     float norm = 0.0f;
     for (float v : output.orientation_vector) norm += v * v;
     norm = sqrt(norm);
+
     if (norm > 0) {
         for (float& v : output.orientation_vector) {
             v /= norm;
             if (v > 0.2f) v = 0.2f;
         }
-        // 再次 L2 normalization（SIFT 標準流程）
+
+        // 再次正規化
         norm = 0.0f;
         for (float v : output.orientation_vector) norm += v * v;
         norm = sqrt(norm);
-        if (norm > 0) for (float& v : output.orientation_vector) v /= norm;
-    }
-
-    // 主方向循環平移
-    auto max_it = max_element(output.orientation_vector.begin(), output.orientation_vector.end());
-    int max_idx = static_cast<int>(distance(output.orientation_vector.begin(), max_it));
-    if (max_idx != 0) {
-        rotate(output.orientation_vector.begin(),
-            output.orientation_vector.begin() + max_idx,
-            output.orientation_vector.end());
+        if (norm > 0) {
+            for (float& v : output.orientation_vector) v /= norm;
+        }
     }
 
     return output;
@@ -260,16 +239,17 @@ vector<descriptor> get_all_descipter(Mat image_gray_blur, Mat grad_x, Mat grad_y
 }
 
 float cal_dis(descriptor d_1, descriptor d_2) {
+    if (d_1.orientation_vector.size() != d_2.orientation_vector.size()) {
+        return 1e9; // 維度不匹配
+    }
+
     float dis = 0;
-    int cnt = 0;
     for (size_t i = 0; i < d_1.orientation_vector.size(); ++i) {
         float diff = d_1.orientation_vector[i] - d_2.orientation_vector[i];
         dis += diff * diff;
-        if (d_1.orientation_vector[i] == 0 && d_2.orientation_vector[i] == 0) cnt++;
     }
-    dis = sqrt(dis);
-    if (cnt > d_1.orientation_vector.size() / 2) dis = 10;
-    return dis;
+
+    return sqrt(dis); // 標準 L2 距離
 }
 /*==================== match keypoints ===================*/
 // 匹配點結構
@@ -287,35 +267,43 @@ vector<pair<int, int>> get_match_keypoints(
     const vector<descriptor>& descriptor_image_1,
     const vector<descriptor>& descriptor_image_2,
     int ransac_iter = 10000,
-    float match_threshold = 0.25,
+    float match_threshold = 0.2,
     float ransac_inlier_threshold = 2.0f)
 {
 	//cout << "get_match_keypoints" << endl;
 
-    int max_desc = 5000;
+    int max_desc = 10000;
     int n1 = min((int)descriptor_image_1.size(), max_desc);
     int n2 = min((int)descriptor_image_2.size(), max_desc);
 
     // 1. 初步最近鄰匹配
 	cout << n1 << " " << n2 << endl;
     vector<MatchPair> initial_matches;
-	int total_comparisons = n1 * n2;
+    float ratio_threshold = 0.7f;
+    // 改用 Ratio Test 進行初步匹配
     for (int i = 0; i < n1; ++i) {
         float min_dist = 1e9;
+        float second_min_dist = 1e9;
         int min_j = -1;
+
         for (int j = 0; j < n2; ++j) {
-            //cout << "Matching: " << (i * n2 + j + 1) << "/" << total_comparisons << "\r" << flush;
             float dist = cal_dis(descriptor_image_1[i], descriptor_image_2[j]);
             if (dist < min_dist) {
+                second_min_dist = min_dist;
                 min_dist = dist;
                 min_j = j;
             }
+            else if (dist < second_min_dist) {
+                second_min_dist = dist;
+            }
         }
-        if (min_dist < match_threshold) {
+
+        // Ratio Test: 最近距離 / 次近距離 < 閾值
+        if (min_j != -1 && second_min_dist > 0 &&
+            min_dist / second_min_dist < ratio_threshold) {
             initial_matches.push_back({ i, min_j });
         }
     }
-    if (initial_matches.size() < 4) return {}; // 不足4組無法RANSAC
 
     // 2. RANSAC 主流程
     int best_inlier_count = 0;
@@ -359,7 +347,14 @@ vector<pair<int, int>> get_match_keypoints(
         if (inliers.size() > best_inlier_count) {
             best_inlier_count = static_cast<int>(inliers.size());
             best_inliers = inliers;
+
+            if (best_inlier_count > initial_matches.size() * 0.8) {
+                cout << "\n提早終止 RANSAC，找到穩定解" << endl;
+                break;
+            }
         }
+
+
     }
 
     // 3. 回傳最佳 inlier 配對
@@ -370,21 +365,81 @@ vector<pair<int, int>> get_match_keypoints(
     return output;
 }
 
+void SIFT() {
+
+    // 1. 建立 SIFT 物件
+    // 
+    // 
+
+    // SIFT 檢測與描述
+    /*
+    Ptr<SIFT> sift = SIFT::create();
+    vector<KeyPoint> keypoints1, keypoints2;
+    Mat descriptors1, descriptors2;
+
+    Mat img1_8u, img2_8u;
+    image_gray_1.convertTo(img1_8u, CV_8U);  // 直接用原圖，不用模糊後的
+    image_gray_2.convertTo(img2_8u, CV_8U);
+
+    sift->detectAndCompute(img1_8u, noArray(), keypoints1, descriptors1);
+    sift->detectAndCompute(img2_8u, noArray(), keypoints2, descriptors2);
+
+    cout << "找到特徵點：" << keypoints1.size() << " / " << keypoints2.size() << endl;
+
+    // 特徵匹配
+    BFMatcher matcher(NORM_L2);
+    vector<vector<DMatch>> knn_matches;
+    matcher.knnMatch(descriptors1, descriptors2, knn_matches, 2);
+
+    // Ratio test
+    vector<DMatch> good_matches;
+    for (size_t i = 0; i < knn_matches.size(); ++i) {
+        if (knn_matches[i].size() >= 2 &&
+            knn_matches[i][0].distance < 0.7f * knn_matches[i][1].distance) {
+            good_matches.push_back(knn_matches[i][0]);
+        }
+    }
+
+    cout << "找到 " << good_matches.size() << " 組配對點" << endl;
+
+    // 畫出匹配結果
+    Mat img_matches;
+    drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
+        Scalar::all(-1), Scalar::all(-1), vector<char>(),
+        DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+    imwrite("matches.jpg", img_matches);
+
+    // 取得配對點
+    vector<Point2f> pts1, pts2;
+    for (const auto& m : good_matches) {
+        pts1.push_back(keypoints1[m.queryIdx].pt);
+        pts2.push_back(keypoints2[m.trainIdx].pt);
+    }
+    */
+    //Mat H = findHomography(pts2, pts1, RANSAC);
+
+    //// 5. 拼接影像
+    //Mat result;
+    //warpPerspective(image_2, result, H, Size(image_2.cols + image_2.cols, image_1.rows));
+    //image_1.copyTo(result(Rect(0, 0, image_1.cols, image_1.rows)));
+
+    //imwrite("Stitched_SIFT.jpg", result);
+}
 /*=============================== main function =============================*/
 int main() {
-    /*
+    
     //vector<pair<int, int>> match_kepoints;
 
     //vector<descriptor> descriptor_image_1, descriptor_image_2;
     // read image
     Mat image_1 = imread("01.JPG", IMREAD_COLOR);
     Mat image_2 = imread("02.JPG", IMREAD_COLOR);
-
+    
 	// convert to gray
     Mat  image_gray_1, image_gray_2;
     cvtColor(image_1, image_gray_1, COLOR_BGR2GRAY);
     cvtColor(image_2, image_gray_2, COLOR_BGR2GRAY);
-
+    
 	// 從 CV_8U 轉成 CV_32F (int -> float)
 	image_gray_1.convertTo(image_gray_1, CV_32F);
     image_gray_2.convertTo(image_gray_2, CV_32F);
@@ -427,149 +482,46 @@ int main() {
 
 	// calculate SIFT descriptor
 	vector<descriptor> descriptor_image_1, descriptor_image_2;
+	vector<pair<int, int>> match_kepoints;
+    descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
+    descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
+    match_kepoints = get_match_keypoints(descriptor_image_1, descriptor_image_2);
+	cout << "找到 " << match_kepoints.size() << " 組配對點" << endl;
 
-    //descriptor_image_1 = get_all_descipter(image_gray_blur_1,grad_x_1, grad_y_1, keypoints_1);
-    //descriptor_image_2 = get_all_descipter(image_gray_blur_2,grad_x_2, grad_y_2, keypoints_2);
-    // 1. 建立 SIFT 物件
-    // 
-    // 
-    
-    // SIFT 檢測與描述
-    Ptr<SIFT> sift = SIFT::create();
+	// 畫出匹配結果
     vector<KeyPoint> keypoints1, keypoints2;
-    Mat descriptors1, descriptors2;
-
-    Mat img1_8u, img2_8u;
-    image_gray_1.convertTo(img1_8u, CV_8U);  // 直接用原圖，不用模糊後的
-    image_gray_2.convertTo(img2_8u, CV_8U);
-
-    sift->detectAndCompute(img1_8u, noArray(), keypoints1, descriptors1);
-    sift->detectAndCompute(img2_8u, noArray(), keypoints2, descriptors2);
-
-    cout << "找到特徵點：" << keypoints1.size() << " / " << keypoints2.size() << endl;
-
-    // 特徵匹配
-    BFMatcher matcher(NORM_L2);
-    vector<vector<DMatch>> knn_matches;
-    matcher.knnMatch(descriptors1, descriptors2, knn_matches, 2);
-
-    // Ratio test
     vector<DMatch> good_matches;
-    for (size_t i = 0; i < knn_matches.size(); ++i) {
-        if (knn_matches[i].size() >= 2 &&
-            knn_matches[i][0].distance < 0.2f * knn_matches[i][1].distance) {
-            good_matches.push_back(knn_matches[i][0]);
-        }
+
+    // 轉換關鍵點格式
+    for (size_t i = 0; i < keypoints_1.size(); ++i) {
+        keypoints1.push_back(KeyPoint(keypoints_1[i], 1.0f));
+    }
+    for (size_t i = 0; i < keypoints_2.size(); ++i) {
+        keypoints2.push_back(KeyPoint(keypoints_2[i], 1.0f));
     }
 
-    cout << "找到 " << good_matches.size() << " 組配對點" << endl;
-    if (good_matches.size() < 4) {
-        cout << "配對點不足，無法計算 Homography！" << endl;
-        return -1;
+    // 轉換匹配結果格式
+    for (size_t i = 0; i < match_kepoints.size(); ++i) {
+        good_matches.push_back(DMatch(match_kepoints[i].first, match_kepoints[i].second, 0.0f));
     }
 
-    // 畫出匹配結果
     Mat img_matches;
     drawMatches(image_1, keypoints1, image_2, keypoints2, good_matches, img_matches,
         Scalar::all(-1), Scalar::all(-1), vector<char>(),
         DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
     imwrite("matches.jpg", img_matches);
 
-    // 取得配對點
     vector<Point2f> pts1, pts2;
-    for (const auto& m : good_matches) {
-        pts1.push_back(keypoints1[m.queryIdx].pt);
-        pts2.push_back(keypoints2[m.trainIdx].pt);
+    for (const auto& match : match_kepoints) {
+        pts1.push_back(Point2f(keypoints_1[match.first].x, keypoints_1[match.first].y));
+        pts2.push_back(Point2f(keypoints_2[match.second].x, keypoints_2[match.second].y));
     }
 
-    // 計算 Homography
-    cout << "計算 Homography..." << endl;
-    Mat H = findHomography(pts2 , pts1, RANSAC, 1.0);
-    if (H.empty()) {
-        cout << "Homography 計算失敗！" << endl;
-        return -1;
-    }
-    cout << "Homography matrix:\n" << H << endl;
-
-    // 影像拼接
-   // 1. 先建立以 image1 為底的結果圖
-    Mat result = Mat::zeros(Size(image_1.cols * 2, image_1.rows * 1.2), image_1.type());
+    Mat H = findHomography(pts2, pts1, RANSAC);
+    Mat result;
+    warpPerspective(image_2, result, H, Size(image_1.cols + image_2.cols, image_1.rows));
     image_1.copyTo(result(Rect(0, 0, image_1.cols, image_1.rows)));
 
-    // 4. 變換 image2 並疊加到 result 上
-    Mat warped_image2;
-    warpPerspective(image_2, warped_image2, H, result.size());
-
-    // 5. 混合兩張圖
-    for (int y = 0; y < result.rows; y++) {
-        for (int x = 0; x < result.cols; x++) {
-            Vec3b pixel1 = result.at<Vec3b>(y, x);
-            Vec3b pixel2 = warped_image2.at<Vec3b>(y, x);
-
-            // 如果兩個位置都有像素，取平均值
-            if (pixel1 != Vec3b(0, 0, 0) && pixel2 != Vec3b(0, 0, 0)) {
-                Vec3b blended;
-                for (int c = 0; c < 3; c++)
-                    blended[c] = uchar((int(pixel1[c]) + int(pixel2[c])) / 2);
-                result.at<Vec3b>(y, x) = blended;
-            }
-            // 如果只有 image2 有像素，則使用 image2 的值
-            else if (pixel2 != Vec3b(0, 0, 0)) {
-                result.at<Vec3b>(y, x) = pixel2;
-            }
-            // 如果只有 image1 有像素，保持原值
-        }
-    }
-
-    // 6. 裁切黑邊
-    Mat gray;
-    cvtColor(result, gray, COLOR_BGR2GRAY);
-    Mat mask = gray > 0;
-    Rect bbox = boundingRect(mask);
-    Mat cropped = result(bbox);
-
-    // 7. 儲存結果
-    imwrite("panorama_image1_base1.jpg", result);
-    imwrite("panorama_image1_base_cropped1.jpg", cropped);
-   
-    //
-    */
-    // 1. 偵測 ORB 特徵點
-    Mat img1 = imread("01.JPG");
-    Mat img2 = imread("02.JPG");
-
-    Ptr<ORB> orb = ORB::create();
-    vector<KeyPoint> kp1, kp2;
-    Mat desc1, desc2;
-    orb->detectAndCompute(img1, noArray(), kp1, desc1);
-    orb->detectAndCompute(img2, noArray(), kp2, desc2);
-
-    // 2. 特徵點匹配
-    BFMatcher matcher(NORM_HAMMING);
-    vector<DMatch> matches;
-    matcher.match(desc1, desc2, matches);
-
-    // 3. 選擇最佳匹配（簡單方法）
-    sort(matches.begin(), matches.end());
-    matches.resize(matches.size() * 0.15); // 取前15%好點
-
-    // 4. 計算 Homography
-    vector<Point2f> pts1, pts2;
-    for (auto& m : matches) {
-        pts1.push_back(kp1[m.queryIdx].pt);
-        pts2.push_back(kp2[m.trainIdx].pt);
-    }
-    Mat H = findHomography(pts2, pts1, RANSAC);
-
-    // 5. 拼接影像
-    Mat result;
-    warpPerspective(img2, result, H, Size(img1.cols + img2.cols, img1.rows));
-    img1.copyTo(result(Rect(0, 0, img1.cols, img1.rows)));
-
-    imwrite("Stitched.jpg", result);
-    waitKey(0);
-    return 0;
-
-    return 0;
     
+    return 0;
 }
